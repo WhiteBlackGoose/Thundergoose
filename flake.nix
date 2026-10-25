@@ -28,7 +28,7 @@
         ];
       in {
         devShells.default = pkgs.mkShell {
-          packages = with pkgs; [ cargo rustc rustfmt clippy rust-analyzer pkg-config ];
+          packages = with pkgs; [ cargo rustc rustfmt clippy rust-analyzer pkg-config python3 ];
           buildInputs = runtimeLibs;
           LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibs;
         };
@@ -38,7 +38,7 @@
           version = "0.1.0";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
+          nativeBuildInputs = with pkgs; [ pkg-config makeWrapper python3 ];
           buildInputs = runtimeLibs;
           doCheck = false;
           postInstall = lib.optionalString isLinux ''

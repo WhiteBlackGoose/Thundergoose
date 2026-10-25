@@ -48,7 +48,7 @@ jobs:
     container: fedora:latest
     steps:
       - name: Build dependencies
-        run: dnf install -y gcc gcc-c++ git jq fontconfig-devel freetype-devel libxkbcommon-devel
+        run: dnf install -y gcc gcc-c++ git jq python3 fontconfig-devel freetype-devel libxkbcommon-devel
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
