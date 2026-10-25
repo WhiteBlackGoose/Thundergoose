@@ -1,0 +1,54 @@
+import { Palette } from "std-widgets.slint";
+
+export global Theme {
+    /// 0 violet, 1 blue, 2 teal, 3 orange, 4 rose
+    in-out property <int> accent-scheme: 0;
+    // "Follow system" sets the scheme to unknown; the style then picks the system scheme
+    // internally, which shows up in its background color.
+    out property <bool> dark: Palette.color-scheme == ColorScheme.dark
+        || (Palette.color-scheme == ColorScheme.unknown && Palette.background.to-hsv().value < 0.5);
+
+    out property <color> bg: dark ? #121216 : #eef0f4;
+    out property <color> surface: dark ? #1b1b21 : #ffffff;
+    out property <color> surface-2: dark ? #23232b : #f5f6f9;
+    out property <color> surface-3: dark ? #2c2c36 : #eaecf1;
+    out property <color> hover: dark ? #ffffff10 : #0000000a;
+    out property <color> pressed: dark ? #ffffff1c : #00000014;
+    out property <color> border: dark ? #2b2b34 : #e2e4ea;
+    out property <color> border-strong: dark ? #3a3a46 : #cfd2da;
+    out property <color> text: dark ? #ececf2 : #1a1b22;
+    out property <color> text-muted: dark ? #9a9aab : #646778;
+    out property <color> text-faint: dark ? #6a6a7a : #9a9daa;
+
+    out property <color> accent: accent-scheme == 1 ? (dark ? #4c9dff : #1f6fe5)
+        : accent-scheme == 2 ? (dark ? #2dd4bf : #0d9488)
+        : accent-scheme == 3 ? (dark ? #ff9a3d : #e8710a)
+        : accent-scheme == 4 ? (dark ? #fb7185 : #e11d48)
+        : (dark ? #8b74ff : #6a4cf5);
+    out property <color> accent-hover: dark ? accent.brighter(0.12) : accent.darker(0.12);
+    out property <color> accent-soft: accent.with-alpha(dark ? 0.2 : 0.13);
+    out property <color> accent-text: #ffffff;
+
+    // Brand gradient (logo, empty state).
+    out property <color> brand-1: accent-scheme == 1 ? #7dd3fc : accent-scheme == 2 ? #5eead4 : accent-scheme == 3 ? #fdba74 : accent-scheme == 4 ? #fda4af : #a78bfa;
+    out property <color> brand-2: accent-scheme == 1 ? #2563eb : accent-scheme == 2 ? #0d9488 : accent-scheme == 3 ? #ea580c : accent-scheme == 4 ? #e11d48 : #6a4cf5;
+    out property <color> brand-3: accent-scheme == 1 ? #8b5cf6 : accent-scheme == 2 ? #2563eb : accent-scheme == 3 ? #db2777 : accent-scheme == 4 ? #9333ea : #ec4899;
+
+    // Chat bubbles.
+    out property <color> bubble-in: surface;
+    out property <color> bubble-out: dark ? accent.mix(#1b1b21, 0.32) : accent.mix(#ffffff, 0.16);
+    out property <color> bubble-out-border: accent.with-alpha(dark ? 0.35 : 0.25);
+
+    out property <color> danger: dark ? #ff6b7a : #d83a4c;
+    out property <color> success: dark ? #4ade80 : #16a34a;
+    out property <color> warning: dark ? #fbbf24 : #d97706;
+    out property <color> shadow: dark ? #00000080 : #1a1b2224;
+    out property <color> backdrop: dark ? #000000a0 : #1a1b2266;
+
+    out property <length> radius: 10px;
+    out property <length> radius-sm: 6px;
+    out property <length> font-sm: 11px;
+    out property <length> font: 12.5px;
+    out property <length> font-md: 13.5px;
+    out property <length> font-lg: 15px;
+}

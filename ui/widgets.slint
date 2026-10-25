@@ -1,0 +1,379 @@
+import { Theme } from "theme.slint";
+import { Tip, App } from "state.slint";
+import { Icons } from "icons.slint";
+
+export component Divider inherits Rectangle {
+    background: Theme.border;
+    height: 1px;
+}
+
+export component VDivider inherits Rectangle {
+    background: Theme.border;
+    width: 1px;
+}
+
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> tip;
+    in property <bool> active;
+    in property <bool> enabled: true;
+    in property <length> size: 30px;
+    in property <length> icon-size: 16px;
+    in property <color> tint: Theme.text;
+    in property <int> tip-side: 0; // 0 below, 1 right, 2 above, 3 left
+    out property <bool> hovered: ta.has-hover;
+    callback clicked;
+    width: size;
+    height: size;
+    border-radius: Theme.radius-sm;
+    background: active ? Theme.accent-soft : (ta.pressed && enabled) ? Theme.pressed : (ta.has-hover && enabled) ? Theme.hover : transparent;
+    animate background { duration: 90ms; }
+    Image {
+        source: root.icon;
+        width: root.icon-size;
+        height: root.icon-size;
+        colorize: !root.enabled ? Theme.text-faint : root.active ? Theme.accent : root.tint;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            Tip.hide();
+            root.clicked();
+        }
+        changed has-hover => {
+            if self.has-hover && root.tip != "" {
+                if root.tip-side == 1 {
+                    Tip.show(root.tip, root.absolute-position.x + root.width + 6px, root.absolute-position.y + root.height / 2 - 12px);
+                } else if root.tip-side == 2 {
+                    Tip.show(root.tip, root.absolute-position.x, root.absolute-position.y - 30px);
+                } else if root.tip-side == 3 {
+                    Tip.show(root.tip, root.absolute-position.x - 160px, root.absolute-position.y + root.height / 2 - 12px);
+                } else {
+                    Tip.show(root.tip, root.absolute-position.x, root.absolute-position.y + root.height + 6px);
+                }
+            } else {
+                Tip.hide();
+            }
+        }
+    }
+}
+
+export component Btn inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: 32px;
+    min-width: max(84px, row.preferred-width + 28px);
+    border-radius: 8px;
+    opacity: enabled ? 1 : 0.5;
+    background: primary ? (ta.pressed ? Theme.accent.darker(0.15) : ta.has-hover ? Theme.accent-hover : Theme.accent)
+        : danger ? (ta.has-hover ? Theme.danger.darker(0.1) : Theme.danger)
+        : (ta.pressed ? Theme.pressed : ta.has-hover ? Theme.surface-3 : Theme.surface-2);
+    border-width: (primary || danger) ? 0px : 1px;
+    border-color: Theme.border-strong;
+    animate background { duration: 90ms; }
+    row := HorizontalLayout {
+        alignment: center;
+        spacing: 6px;
+        if root.icon.width > 0: Image {
+            source: root.icon;
+            width: 14px;
+            height: 14px;
+            y: (parent.height - self.height) / 2;
+            colorize: (root.primary || root.danger) ? Theme.accent-text : Theme.text;
+        }
+        Text {
+            text: root.text;
+            color: (root.primary || root.danger) ? Theme.accent-text : Theme.text;
+            font-weight: 600;
+            font-size: Theme.font;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Card inherits Rectangle {
+    background: Theme.surface;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.border;
+    drop-shadow-blur: 14px;
+    drop-shadow-color: Theme.shadow;
+    drop-shadow-offset-y: 2px;
+}
+
+export component Segmented inherits Rectangle {
+    in property <[string]> items;
+    in-out property <int> selected;
+    in property <length> item-min-width: 0px;
+    callback changed(int);
+    height: 28px;
+    border-radius: 7px;
+    background: Theme.surface-3;
+    HorizontalLayout {
+        padding: 2px;
+        spacing: 2px;
+        for it[i] in root.items: Rectangle {
+            border-radius: 5px;
+            background: i == root.selected ? Theme.surface : (ita.has-hover ? Theme.hover : transparent);
+            drop-shadow-blur: i == root.selected ? 3px : 0px;
+            drop-shadow-color: Theme.shadow;
+            min-width: root.item-min-width;
+            preferred-width: t.preferred-width + 16px;
+            horizontal-stretch: 1;
+            t := Text {
+                text: it;
+                width: parent.width - 6px;
+                overflow: elide;
+                color: i == root.selected ? Theme.text : Theme.text-muted;
+                font-size: Theme.font-sm + 0.5px;
+                font-weight: i == root.selected ? 600 : 500;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            ita := TouchArea {
+                clicked => {
+                    root.selected = i;
+                    root.changed(i);
+                }
+            }
+        }
+    }
+}
+
+/// Round avatar with initials, or a people icon for group conversations.
+export component Avatar inherits Rectangle {
+    in property <string> initials;
+    in property <color> hue: Theme.accent;
+    in property <bool> group;
+    in property <length> size: 40px;
+    /// A website icon shown instead of the initials.
+    in property <image> icon;
+    in property <bool> has-icon;
+    /// The "Yourself" conversation.
+    in property <bool> me;
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: has-icon ? #ffffff : me ? @linear-gradient(135deg, Theme.brand-1 0%, Theme.brand-2 55%, Theme.brand-3 100%) : @linear-gradient(135deg, hue.brighter(0.25) 0%, hue.darker(0.1) 100%);
+    border-width: has-icon ? 1px : 0px;
+    border-color: Theme.border;
+    if root.has-icon: Rectangle {
+        width: root.size * 0.6;
+        height: root.size * 0.6;
+        border-radius: root.size * 0.12;
+        clip: true;
+        Image {
+            source: root.icon;
+            width: parent.width;
+            height: parent.height;
+            image-fit: contain;
+        }
+    }
+    if root.me && !root.has-icon: Image {
+        source: Icons.bookmark;
+        width: root.size * 0.46;
+        height: root.size * 0.46;
+        colorize: #ffffff;
+    }
+    if !root.group && !root.has-icon && !root.me: Text {
+        text: root.initials;
+        color: #ffffff;
+        font-size: root.size * 0.38;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    if root.group && !root.has-icon: Image {
+        source: Icons.users;
+        width: root.size * 0.48;
+        height: root.size * 0.48;
+        colorize: #ffffff;
+    }
+}
+
+/// Single-line text field in the Neobrush style.
+export component Field inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    in property <image> icon;
+    in property <bool> clearable: true;
+    in property <length> font-size: Theme.font + 0.5px;
+    in property <InputType> input-type <=> input.input-type;
+    callback edited(string);
+    callback accepted();
+    callback escape();
+    callback key-down() -> bool;
+    callback key-up() -> bool;
+    public function focus-input() { input.focus(); }
+    height: 34px;
+    border-radius: 8px;
+    background: Theme.surface-2;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.border;
+    animate border-color { duration: 120ms; }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 6px;
+        spacing: 8px;
+        if root.icon.width > 0: Image {
+            source: root.icon;
+            width: 14px;
+            height: 14px;
+            y: (parent.height - self.height) / 2;
+            colorize: Theme.text-faint;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            input := TextInput {
+                width: 100%;
+                color: Theme.text;
+                font-size: root.font-size;
+                vertical-alignment: center;
+                single-line: true;
+                selection-background-color: Theme.accent-soft;
+                selection-foreground-color: Theme.text;
+                edited => { root.edited(self.text); }
+                accepted => { root.accepted(); }
+                changed has-focus => { App.text-focus = self.has-focus; }
+                key-pressed(e) => {
+                    if e.text == Key.Escape {
+                        root.escape();
+                        return accept;
+                    }
+                    if e.text == Key.DownArrow {
+                        return root.key-down() ? accept : reject;
+                    }
+                    if e.text == Key.UpArrow {
+                        return root.key-up() ? accept : reject;
+                    }
+                    reject
+                }
+            }
+            if input.text == "": Text {
+                width: 100%;
+                text: root.placeholder;
+                color: Theme.text-faint;
+                font-size: root.font-size;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+        if root.clearable && input.text != "": IconButton {
+            y: (parent.height - self.height) / 2;
+            size: 22px;
+            icon-size: 12px;
+            icon: Icons.x;
+            tint: Theme.text-muted;
+            clicked => {
+                input.text = "";
+                root.edited("");
+                root.escape();
+            }
+        }
+    }
+}
+
+/// Small rounded label, optionally clickable.
+export component Chip inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> active;
+    in property <bool> clickable: true;
+    in property <color> dot: transparent;
+    in property <string> tip;
+    callback clicked;
+    height: 26px;
+    width: row.preferred-width + 20px;
+    border-radius: 13px;
+    background: active ? Theme.accent-soft : ta.has-hover && clickable ? Theme.surface-3 : Theme.surface-2;
+    border-width: 1px;
+    border-color: active ? Theme.accent.with-alpha(0.4) : Theme.border;
+    animate background { duration: 90ms; }
+    row := HorizontalLayout {
+        x: 10px;
+        spacing: 6px;
+        alignment: start;
+        if root.dot != transparent: Rectangle {
+            width: 7px;
+            height: 7px;
+            y: (parent.height - 7px) / 2;
+            border-radius: 3.5px;
+            background: root.dot;
+        }
+        if root.icon.width > 0: Image {
+            source: root.icon;
+            width: 13px;
+            height: 13px;
+            y: (parent.height - self.height) / 2;
+            colorize: root.active ? Theme.accent : Theme.text-muted;
+        }
+        Text {
+            text: root.text;
+            font-size: Theme.font-sm + 0.5px;
+            font-weight: 600;
+            color: root.active ? Theme.accent : Theme.text-muted;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.clickable;
+        mouse-cursor: root.clickable ? pointer : default;
+        clicked => {
+            Tip.hide();
+            root.clicked();
+        }
+        changed has-hover => {
+            if self.has-hover && root.tip != "" {
+                Tip.show(root.tip, root.absolute-position.x, root.absolute-position.y + root.height + 6px);
+            } else {
+                Tip.hide();
+            }
+        }
+    }
+}
+
+/// Inline text link.
+export component LinkText inherits Text {
+    in property <bool> subtle;
+    callback clicked;
+    color: subtle ? (ta.has-hover ? Theme.accent : Theme.text-faint) : ta.has-hover ? Theme.accent-hover : Theme.accent;
+    font-size: Theme.font-sm + 0.5px;
+    font-weight: 600;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component FieldLabel inherits Text {
+    color: Theme.text-muted;
+    font-size: Theme.font-sm + 0.5px;
+    font-weight: 500;
+    vertical-alignment: center;
+}
+
+/// Small rotating refresh glyph shown while syncing.
+export component Spinner inherits Rectangle {
+    in property <bool> running;
+    in property <length> size: 14px;
+    width: size;
+    height: size;
+    Image {
+        source: Icons.refresh;
+        width: root.size;
+        height: root.size;
+        colorize: Theme.accent;
+        transform-origin: { x: self.width / 2, y: self.height / 2 };
+        transform-rotation: root.running ? -(animation-tick() / 3ms) * 1deg : 0deg;
+    }
+}

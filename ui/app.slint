@@ -1,0 +1,1599 @@
+import "fonts/Inter-400.ttf";
+import "fonts/Inter-500.ttf";
+import "fonts/Inter-600.ttf";
+
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+import { App, Tip, PeerItem, MessageItem, AttachmentItem, AccountItem, Participant } from "state.slint";
+import { IconButton, Btn, Card, Divider, VDivider, Segmented, Avatar, Field, Chip, LinkText, FieldLabel, Spinner } from "widgets.slint";
+import { ListView, ScrollView, TextEdit, Palette } from "std-widgets.slint";
+
+export { App, Tip, Theme, Palette, PeerItem, MessageItem, AttachmentItem, AccountItem, Participant }
+
+component Brand inherits HorizontalLayout {
+    spacing: 9px;
+    Rectangle {
+        width: 28px;
+        height: 28px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 8px;
+        background: @linear-gradient(135deg, Theme.brand-1 0%, Theme.brand-2 55%, Theme.brand-3 100%);
+        Image {
+            source: Icons.mail;
+            width: 15px;
+            height: 15px;
+            colorize: #ffffff;
+        }
+    }
+    Text {
+        text: "Thundergoose";
+        font-size: Theme.font-lg;
+        font-weight: 600;
+        color: Theme.text;
+        vertical-alignment: center;
+    }
+}
+
+component PeerRow inherits Rectangle {
+    in property <PeerItem> item;
+    in property <bool> selected;
+    callback clicked;
+    callback flag(int);
+    callback mark-read();
+    // The quick buttons count as part of the row, or they would vanish under the pointer.
+    property <bool> hovered: ta.has-hover || q-fav.hovered || q-mute.hovered || q-ignore.hovered;
+    height: 66px;
+    border-radius: 10px;
+    background: selected ? Theme.accent-soft : ta.pressed ? Theme.pressed : root.hovered ? Theme.hover : transparent;
+    animate background { duration: 80ms; }
+    ContextMenuArea {
+        enabled: !root.item.is-new;
+        Menu {
+            MenuItem {
+                title: root.item.favorite ? @tr("Remove from favorites") : @tr("Add to favorites");
+                activated => { root.flag(0); }
+            }
+            MenuItem {
+                title: root.item.muted ? @tr("Unmute") : @tr("Mute notifications");
+                activated => { root.flag(1); }
+            }
+            MenuItem {
+                title: root.item.ignored ? @tr("Stop ignoring") : @tr("Ignore");
+                activated => { root.flag(2); }
+            }
+            if root.item.unread > 0: MenuSeparator { }
+            if root.item.unread > 0: MenuItem {
+                title: @tr("Mark as read");
+                activated => { root.mark-read(); }
+            }
+        }
+        ta := TouchArea {
+            clicked => { root.clicked(); }
+        }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 11px;
+        VerticalLayout {
+            alignment: center;
+            if !root.item.is-new: Avatar {
+                initials: root.item.initials;
+                hue: root.item.hue;
+                group: root.item.group;
+                icon: root.item.icon;
+                has-icon: root.item.has-icon;
+                me: root.item.me;
+                size: 42px;
+            }
+            if root.item.is-new: Rectangle {
+                width: 42px;
+                height: 42px;
+                border-radius: 21px;
+                background: Theme.accent-soft;
+                Image { source: Icons.new-chat; width: 18px; height: 18px; colorize: Theme.accent; }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: root.item.title;
+                    color: root.item.ignored ? Theme.text-muted : Theme.text;
+                    font-size: Theme.font-md;
+                    font-weight: root.item.unread > 0 ? 600 : 500;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                if root.item.muted: Image {
+                    source: Icons.bell-off;
+                    width: 12px;
+                    height: 12px;
+                    y: (parent.height - self.height) / 2;
+                    colorize: Theme.text-faint;
+                }
+                if root.item.favorite: Image {
+                    source: Icons.star-filled;
+                    width: 12px;
+                    height: 12px;
+                    y: (parent.height - self.height) / 2;
+                    colorize: Theme.warning;
+                }
+                Text {
+                    text: root.item.time;
+                    color: root.item.unread > 0 && !root.item.muted ? Theme.accent : Theme.text-faint;
+                    font-size: Theme.font-sm;
+                    font-weight: root.item.unread > 0 ? 600 : 400;
+                    vertical-alignment: center;
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: (root.item.outgoing ? @tr("You: ") : "") + root.item.snippet;
+                    color: root.item.unread > 0 ? Theme.text : Theme.text-muted;
+                    font-size: Theme.font;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                if root.item.unread > 0: Rectangle {
+                    height: 18px;
+                    width: max(18px, badge.preferred-width + 10px);
+                    border-radius: 9px;
+                    background: root.item.muted || root.item.ignored ? Theme.text-faint : Theme.accent;
+                    badge := Text {
+                        text: root.item.unread > 99 ? "99+" : root.item.unread;
+                        color: Theme.accent-text;
+                        font-size: 10.5px;
+                        font-weight: 600;
+                    }
+                }
+            }
+        }
+    }
+    // Quick actions, shown while the pointer is over the row.
+    Rectangle {
+        visible: root.hovered && !root.item.is-new;
+        x: parent.width - self.width - 6px;
+        y: (parent.height - self.height) / 2;
+        width: quick.preferred-width + 8px;
+        height: 34px;
+        border-radius: 9px;
+        background: Theme.surface;
+        drop-shadow-blur: 6px;
+        drop-shadow-color: Theme.shadow.with-alpha(0.18);
+        border-width: 1px;
+        border-color: Theme.border;
+        quick := HorizontalLayout {
+            padding: 4px;
+            spacing: 2px;
+            q-fav := IconButton {
+                size: 26px;
+                icon-size: 14px;
+                icon: root.item.favorite ? Icons.star-filled : Icons.star;
+                tint: root.item.favorite ? Theme.warning : Theme.text-muted;
+                tip: root.item.favorite ? @tr("Remove from favorites") : @tr("Add to favorites");
+                tip-side: 3;
+                clicked => { root.flag(0); }
+            }
+            q-mute := IconButton {
+                size: 26px;
+                icon-size: 14px;
+                icon: root.item.muted ? Icons.bell-off : Icons.bell;
+                active: root.item.muted;
+                tint: Theme.text-muted;
+                tip: root.item.muted ? @tr("Unmute") : @tr("Mute");
+                tip-side: 3;
+                clicked => { root.flag(1); }
+            }
+            q-ignore := IconButton {
+                size: 26px;
+                icon-size: 14px;
+                icon: Icons.ban;
+                active: root.item.ignored;
+                tint: Theme.text-muted;
+                tip: root.item.ignored ? @tr("Stop ignoring") : @tr("Ignore");
+                tip-side: 3;
+                clicked => { root.flag(2); }
+            }
+        }
+    }
+}
+
+component Sidebar inherits Rectangle {
+    background: Theme.surface;
+    callback focus-search();
+    public function focus-search-field() { search.focus-input(); }
+    VerticalLayout {
+        padding-top: 12px;
+        spacing: 10px;
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 10px;
+            spacing: 2px;
+            Brand { }
+            Rectangle { horizontal-stretch: 1; }
+            if App.syncing: VerticalLayout {
+                alignment: center;
+                padding-right: 6px;
+                Spinner { running: true; }
+            }
+            IconButton {
+                icon: Icons.new-chat;
+                tip: @tr("New conversation") + "  Ctrl+N";
+                clicked => { App.start-new-chat(); }
+            }
+            IconButton {
+                icon: Icons.refresh;
+                tip: @tr("Check for new mail") + "  F5";
+                clicked => { App.sync-now(); }
+            }
+            IconButton {
+                icon: Icons.settings;
+                tip: @tr("Settings");
+                clicked => { App.settings-open = true; }
+            }
+        }
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            search := Field {
+                text <=> App.search;
+                icon: Icons.search;
+                placeholder: @tr("Search people, subjects, text… or type an address");
+                edited(t) => { App.search-edited(t); }
+                accepted => { App.search-accepted(); }
+            }
+        }
+        // Account filter
+        Flickable {
+            height: 28px;
+            content-width: chips.preferred-width + 24px;
+            interactive: true;
+            chips := HorizontalLayout {
+                x: 12px;
+                spacing: 6px;
+                Chip {
+                    text: @tr("All");
+                    active: App.account-filter == -1;
+                    clicked => { App.filter(-1); }
+                }
+                for a[i] in App.accounts: Chip {
+                    text: a.label;
+                    dot: a.needs-login ? Theme.danger : !a.online ? Theme.text-faint : a.hue;
+                    active: App.account-filter == i;
+                    tip: a.email + (a.message != "" ? " — " + a.message : "");
+                    clicked => { App.filter(i); }
+                }
+            }
+        }
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            Segmented {
+                items: [
+                    @tr("Chats") + (App.main-unread > 0 ? "  " + App.main-unread : ""),
+                    @tr("Muted") + (App.muted-unread > 0 ? "  " + App.muted-unread : App.muted-count > 0 ? "  (" + App.muted-count + ")" : ""),
+                    @tr("Ignored") + (App.ignored-count > 0 ? "  (" + App.ignored-count + ")" : ""),
+                ];
+                selected <=> App.tab;
+                changed(i) => { App.set-tab(i); }
+            }
+        }
+        Divider { }
+        if App.peers.length == 0: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            padding: 24px;
+            spacing: 6px;
+            Text {
+                text: App.search != "" ? @tr("Nothing found") : App.tab == 1 ? @tr("No muted conversations. Use the bell on a chat to mute it.") : App.tab == 2 ? @tr("Nobody ignored. Use the ⊘ button on a chat to ignore it.") : App.accounts.length == 0 ? @tr("Add an account in Settings to get started") : App.syncing ? @tr("Fetching your mail…") : @tr("No conversations yet");
+                wrap: word-wrap;
+                color: Theme.text-muted;
+                font-size: Theme.font-md;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: App.sync-text;
+                color: Theme.text-faint;
+                font-size: Theme.font-sm;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+        if App.peers.length > 0: ListView {
+            vertical-stretch: 1;
+            for p[i] in App.peers: VerticalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                if p.section != "": Text {
+                    text: p.section;
+                    color: Theme.text-faint;
+                    font-size: Theme.font-sm;
+                    font-weight: 600;
+                    height: 26px;
+                    x: 10px;
+                    vertical-alignment: bottom;
+                }
+                PeerRow {
+                    item: p;
+                    selected: i == App.selected;
+                    clicked => { App.select-peer(i); }
+                    flag(which) => { App.toggle-flag(i, which); }
+                    mark-read => { App.mark-read-at(i); }
+                }
+            }
+        }
+        if App.sync-text != "" && App.peers.length > 0: Rectangle {
+            height: 26px;
+            background: Theme.surface-2;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                Text {
+                    text: App.sync-text;
+                    color: Theme.text-faint;
+                    font-size: Theme.font-sm;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+}
+
+component AttachmentChip inherits Rectangle {
+    in property <AttachmentItem> att;
+    in property <bool> outgoing;
+    callback open();
+    callback save();
+    height: 40px;
+    border-radius: 9px;
+    background: ta.has-hover ? Theme.hover : outgoing ? Theme.surface.with-alpha(0.35) : Theme.surface-2;
+    border-width: 1px;
+    border-color: Theme.border;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.open(); }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 4px;
+        spacing: 9px;
+        Image {
+            source: Icons.file;
+            width: 16px;
+            height: 16px;
+            y: (parent.height - self.height) / 2;
+            colorize: Theme.accent;
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: root.att.name;
+                color: Theme.text;
+                font-size: Theme.font;
+                font-weight: 500;
+                overflow: elide;
+            }
+            Text {
+                text: root.att.size;
+                color: Theme.text-faint;
+                font-size: Theme.font-sm - 0.5px;
+            }
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            size: 28px;
+            icon-size: 14px;
+            icon: Icons.download;
+            tip: @tr("Save as…");
+            tint: Theme.text-muted;
+            clicked => { root.save(); }
+        }
+    }
+}
+
+component ImagePreview inherits Rectangle {
+    in property <AttachmentItem> att;
+    in property <length> max-w;
+    callback open();
+    callback save();
+    property <float> aspect: root.att.preview.width / max(1, root.att.preview.height);
+    width: min(root.max-w, 380px, root.att.preview.width * 1px / 1.5, 420px * root.aspect);
+    height: self.width / root.aspect;
+    border-radius: 10px;
+    clip: true;
+    background: Theme.surface-3;
+    Image {
+        source: root.att.preview;
+        width: parent.width;
+        height: parent.height;
+        image-fit: cover;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.open(); }
+    }
+    Rectangle {
+        visible: ta.has-hover || dl.hovered;
+        x: parent.width - self.width - 6px;
+        y: 6px;
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        background: #000000a0;
+        dl := IconButton {
+            size: 30px;
+            icon-size: 15px;
+            icon: Icons.download;
+            tint: #ffffff;
+            tip: @tr("Save as…") + "  " + root.att.name;
+            clicked => { root.save(); }
+        }
+    }
+}
+
+component MessageRow inherits VerticalLayout {
+    in property <MessageItem> m;
+    in property <length> avail;
+    spacing: 4px;
+    if root.m.day != "": HorizontalLayout {
+        alignment: center;
+        padding-top: 12px;
+        padding-bottom: 6px;
+        Rectangle {
+            height: 24px;
+            width: dayt.preferred-width + 22px;
+            border-radius: 12px;
+            background: Theme.surface-3;
+            dayt := Text {
+                text: root.m.day;
+                color: Theme.text-muted;
+                font-size: Theme.font-sm;
+                font-weight: 600;
+            }
+        }
+    }
+    HorizontalLayout {
+        alignment: root.m.outgoing ? end : start;
+        Rectangle {
+            max-width: root.avail * 0.76;
+            min-width: 120px;
+            background: root.m.outgoing ? Theme.bubble-out : Theme.bubble-in;
+            border-radius: 14px;
+            border-color: root.m.group-label != "" ? Theme.accent.with-alpha(0.45) : root.m.outgoing ? Theme.bubble-out-border : Theme.border;
+            border-width: root.m.group-label != "" ? 1.5px : 1px;
+            drop-shadow-blur: 3px;
+            drop-shadow-offset-y: 1px;
+            drop-shadow-color: Theme.shadow.with-alpha(0.08);
+            VerticalLayout {
+                padding-left: 13px;
+                padding-right: 13px;
+                padding-top: 9px;
+                padding-bottom: 7px;
+                spacing: 5px;
+                if root.m.group-label != "": HorizontalLayout {
+                    spacing: 6px;
+                    Image {
+                        source: Icons.users;
+                        width: 13px;
+                        height: 13px;
+                        y: (parent.height - self.height) / 2;
+                        colorize: Theme.accent;
+                    }
+                    LinkText {
+                        text: root.m.group-label;
+                        overflow: elide;
+                        clicked => { App.open-chat(root.m.group-key); }
+                    }
+                }
+                if root.m.show-sender: Text {
+                    text: root.m.sender;
+                    color: root.m.hue;
+                    font-size: Theme.font;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                if root.m.subject != "": Text {
+                    text: root.m.subject;
+                    color: Theme.text;
+                    font-size: Theme.font;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                    opacity: 0.85;
+                }
+                if root.m.loading: Text {
+                    text: @tr("Loading…");
+                    color: Theme.text-faint;
+                    font-size: Theme.font-md;
+                    font-italic: true;
+                }
+                if root.m.text != "": TextInput {
+                    text: root.m.text;
+                    read-only: true;
+                    single-line: false;
+                    wrap: word-wrap;
+                    color: Theme.text;
+                    font-size: Theme.font-md;
+                    selection-background-color: Theme.accent.with-alpha(0.35);
+                    selection-foreground-color: Theme.text;
+                    changed has-focus => { App.text-focus = self.has-focus; }
+                }
+                for a in root.m.attachments: VerticalLayout {
+                  if a.has-preview: ImagePreview {
+                    att: a;
+                    max-w: root.avail * 0.76 - 26px;
+                    open => { App.open-attachment(root.m.id, a.index); }
+                    save => { App.save-attachment(root.m.id, a.index); }
+                  }
+                  if !a.has-preview: AttachmentChip {
+                    att: a;
+                    outgoing: root.m.outgoing;
+                    min-width: 200px;
+                    open => { App.open-attachment(root.m.id, a.index); }
+                    save => { App.save-attachment(root.m.id, a.index); }
+                  }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: end;
+                    if root.m.can-expand: LinkText {
+                        text: root.m.expanded ? @tr("Show less") : @tr("Show full message");
+                        clicked => { App.toggle-message(root.m.id); }
+                    }
+                    if root.m.has-html: LinkText {
+                        text: @tr("Open original");
+                        clicked => { App.open-html(root.m.id); }
+                    }
+                    LinkText {
+                        text: @tr("Copy");
+                        subtle: true;
+                        clicked => { App.copy(root.m.text); }
+                    }
+                    Text {
+                        text: root.m.via;
+                        color: Theme.text-faint;
+                        font-size: Theme.font-sm;
+                        overflow: elide;
+                        max-width: 320px;
+                    }
+                    Text {
+                        text: root.m.time;
+                        color: Theme.text-faint;
+                        font-size: Theme.font-sm;
+                        TouchArea {
+                            changed has-hover => {
+                                if self.has-hover {
+                                    Tip.show(root.m.full-time, self.absolute-position.x - 80px, self.absolute-position.y - 30px);
+                                } else {
+                                    Tip.hide();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A chip that opens a list of addresses to choose from.
+component AddressPicker inherits Rectangle {
+    in property <string> label;
+    in property <string> text;
+    in property <[string]> options;
+    in property <bool> enabled: true;
+    in property <string> tip;
+    callback picked(int);
+    width: chip.width;
+    height: chip.height;
+    chip := Chip {
+        icon: Icons.at-sign;
+        text: root.label + root.text + (root.enabled ? "  ▾" : "");
+        clickable: root.enabled;
+        tip: root.tip;
+        clicked => { popup.show(); }
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: - self.height - 6px;
+        width: 320px;
+        height: list.preferred-height + 2px;
+        Card {
+            list := VerticalLayout {
+                padding: 6px;
+                spacing: 2px;
+                for o[i] in root.options: Rectangle {
+                    height: 32px;
+                    border-radius: 7px;
+                    background: ota.has-hover ? Theme.hover : transparent;
+                    ota := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.picked(i); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        Text {
+                            text: o;
+                            color: o == root.text ? Theme.accent : Theme.text;
+                            font-size: Theme.font;
+                            font-weight: o == root.text ? 600 : 400;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                        if o == root.text: Image {
+                            source: Icons.check;
+                            width: 14px;
+                            height: 14px;
+                            y: (parent.height - self.height) / 2;
+                            colorize: Theme.accent;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component Composer inherits Rectangle {
+    background: Theme.surface;
+    public function focus-text() { te.focus(); }
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 12px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            AddressPicker {
+                y: (parent.height - self.height) / 2;
+                label: App.draft-self ? @tr("from ") : "";
+                text: App.draft-from;
+                options: App.own-addresses;
+                enabled: App.draft-from-choosable;
+                tip: App.draft-from-choosable ? @tr("Send from another of your addresses") : "";
+                picked(i) => { App.choose-from(i); }
+            }
+            if App.draft-self: AddressPicker {
+                y: (parent.height - self.height) / 2;
+                label: @tr("to ");
+                text: App.draft-to;
+                options: App.own-addresses;
+                enabled: App.own-addresses.length > 1;
+                tip: @tr("Which of your addresses gets it");
+                picked(i) => { App.choose-to(i); }
+            }
+            Field {
+                height: 30px;
+                text <=> App.draft-subject;
+                placeholder: @tr("Subject");
+                clearable: false;
+                font-size: Theme.font;
+            }
+        }
+        if App.draft-attachments.length > 0: Flickable {
+            height: 28px;
+            content-width: att-row.preferred-width;
+            att-row := HorizontalLayout {
+                spacing: 6px;
+                for a[i] in App.draft-attachments: Chip {
+                    icon: Icons.paperclip;
+                    text: a + "   ✕";
+                    tip: @tr("Remove");
+                    clicked => { App.remove-attachment(i); }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            VerticalLayout {
+                alignment: end;
+                IconButton {
+                    size: 36px;
+                    icon-size: 18px;
+                    icon: Icons.paperclip;
+                    tip: @tr("Attach files");
+                    tip-side: 2;
+                    tint: Theme.text-muted;
+                    clicked => { App.attach(); }
+                }
+            }
+            te := TextEdit {
+                height: 96px;
+                text <=> App.draft-text;
+                wrap: word-wrap;
+                font-size: Theme.font-md;
+                placeholder-text: @tr("Write a message…   Ctrl+Enter to send");
+                changed has-focus => { App.text-focus = self.has-focus; }
+                key-pressed(e) => {
+                    if e.text == Key.Return && (e.modifiers.control || e.modifiers.meta) {
+                        App.send();
+                        return accept;
+                    }
+                    reject
+                }
+            }
+            VerticalLayout {
+                alignment: end;
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 20px;
+                    property <bool> ready: !App.sending && (App.draft-text != "" || App.draft-attachments.length > 0);
+                    background: !self.ready ? Theme.surface-3 : sta.pressed ? Theme.accent.darker(0.15) : sta.has-hover ? Theme.accent-hover : Theme.accent;
+                    animate background { duration: 100ms; }
+                    Image {
+                        source: Icons.send;
+                        width: 18px;
+                        height: 18px;
+                        x: 10px;
+                        y: 12px;
+                        colorize: parent.ready ? Theme.accent-text : Theme.text-faint;
+                    }
+                    sta := TouchArea {
+                        enabled: parent.ready;
+                        mouse-cursor: pointer;
+                        clicked => { App.send(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component ChatHeader inherits Rectangle {
+    height: 62px;
+    background: Theme.surface;
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 12px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Avatar {
+                initials: App.chat-initials;
+                hue: App.chat-hue;
+                group: App.chat-group;
+                icon: App.chat-icon;
+                has-icon: App.chat-has-icon;
+                me: App.chat-me;
+                size: 38px;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text {
+                text: App.chat-title;
+                color: Theme.text;
+                font-size: Theme.font-lg;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: App.chat-subtitle;
+                color: sub-ta.has-hover ? Theme.accent : Theme.text-muted;
+                font-size: Theme.font-sm + 0.5px;
+                overflow: elide;
+                sub-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { App.people-open = !App.people-open; }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: App.chat-favorite ? Icons.star-filled : Icons.star;
+                tint: App.chat-favorite ? Theme.warning : Theme.text;
+                tip: App.chat-favorite ? @tr("Remove from favorites") : @tr("Add to favorites (pinned on top)");
+                tip-side: 3;
+                clicked => { App.toggle-flag(-1, 0); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: App.chat-muted ? Icons.bell-off : Icons.bell;
+                active: App.chat-muted;
+                tip: App.chat-muted ? @tr("Unmute") : @tr("Mute: no notifications or sound");
+                tip-side: 3;
+                clicked => { App.toggle-flag(-1, 1); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: Icons.ban;
+                active: App.chat-ignored;
+                tip: App.chat-ignored ? @tr("Stop ignoring") : @tr("Ignore: move to the Ignored tab");
+                tip-side: 3;
+                clicked => { App.toggle-flag(-1, 2); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: Icons.mail;
+                tip: @tr("Mark as unread");
+                tip-side: 3;
+                clicked => { App.mark-unread(); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: App.chat-group ? Icons.users : Icons.user;
+                tip: @tr("Participants");
+                tip-side: 3;
+                active: App.people-open;
+                clicked => { App.people-open = !App.people-open; }
+            }
+        }
+    }
+}
+
+component NewChatHeader inherits Rectangle {
+    height: 62px;
+    background: Theme.surface;
+    public function focus-to() { to.focus-input(); }
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 12px;
+        spacing: 12px;
+        Text {
+            text: @tr("To");
+            color: Theme.text-muted;
+            font-size: Theme.font-md;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            to := Field {
+                text <=> App.new-chat-to;
+                placeholder: @tr("Addresses, separated by commas");
+                icon: Icons.at-sign;
+                accepted => { App.new-chat-confirm(); }
+                escape => { App.cancel-new-chat(); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: Icons.x;
+                tip: @tr("Cancel");
+                tip-side: 3;
+                clicked => { App.cancel-new-chat(); }
+            }
+        }
+    }
+}
+
+component PeoplePopup inherits Card {
+    width: 340px;
+    height: min(360px, col.preferred-height);
+    VerticalLayout {
+        col := VerticalLayout {
+            padding: 12px;
+            spacing: 4px;
+            Text {
+                text: @tr("Participants");
+                color: Theme.text-muted;
+                font-size: Theme.font-sm;
+                font-weight: 600;
+            }
+            for p in App.chat-people: Rectangle {
+                height: 44px;
+                border-radius: 8px;
+                background: pta.has-hover ? Theme.hover : transparent;
+                pta := TouchArea { }
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 4px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: p.name != "" ? p.name : p.addr;
+                            color: Theme.text;
+                            font-size: Theme.font;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
+                        if p.name != "": Text {
+                            text: p.addr;
+                            color: Theme.text-muted;
+                            font-size: Theme.font-sm;
+                            overflow: elide;
+                        }
+                    }
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
+                        size: 28px;
+                        icon-size: 14px;
+                        icon: Icons.copy;
+                        tip: @tr("Copy address");
+                        tip-side: 3;
+                        clicked => { App.copy(p.addr); }
+                    }
+                    if App.chat-people.length > 1: IconButton {
+                        y: (parent.height - self.height) / 2;
+                        size: 28px;
+                        icon-size: 14px;
+                        icon: Icons.new-chat;
+                        tip: @tr("Write only to them");
+                        tip-side: 3;
+                        clicked => {
+                            App.people-open = false;
+                            App.write-to(p.addr);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component ChatView inherits Rectangle {
+    background: Theme.bg;
+    property <int> token: App.scroll-token;
+    property <bool> pending-scroll;
+    // Follow new content while the view is at the bottom (bodies arriving grow the list).
+    property <bool> stick: true;
+    public function focus-composer() { composer.focus-text(); }
+    public function focus-to() { if App.new-chat { nch.focus-to(); } }
+    function to-bottom() {
+        sv.content-y = min(0px, sv.visible-height - sv.content-height);
+    }
+    changed token => {
+        root.stick = true;
+        root.to-bottom();
+        root.pending-scroll = true;
+    }
+    Timer {
+        interval: 30ms;
+        running: root.pending-scroll;
+        triggered => {
+            root.to-bottom();
+            root.pending-scroll = false;
+        }
+    }
+    VerticalLayout {
+        if !App.new-chat: ChatHeader { }
+        nch := NewChatHeader {
+            visible: App.new-chat;
+            height: App.new-chat ? 62px : 0px;
+        }
+        Divider { }
+        sv := ScrollView {
+            vertical-stretch: 1;
+            changed content-height => {
+                if root.stick {
+                    root.to-bottom();
+                }
+            }
+            scrolled => {
+                root.stick = self.content-y <= self.visible-height - self.content-height + 40px;
+            }
+            content-width: self.visible-width;
+            content-height: max(self.visible-height, list.preferred-height);
+            list := VerticalLayout {
+                width: sv.visible-width;
+                height: max(sv.visible-height, self.preferred-height);
+                alignment: end;
+                padding-left: 22px;
+                padding-right: 22px;
+                padding-top: 12px;
+                padding-bottom: 14px;
+                spacing: 7px;
+                if App.has-earlier: HorizontalLayout {
+                    alignment: center;
+                    padding-bottom: 6px;
+                    Btn {
+                        text: @tr("Load earlier messages");
+                        icon: Icons.chevron-up;
+                        clicked => { App.load-earlier(); }
+                    }
+                }
+                if App.new-chat && App.messages.length == 0: VerticalLayout {
+                    alignment: center;
+                    padding-bottom: 40px;
+                    Text {
+                        text: @tr("Start a new conversation. Write to one address for a chat with that person, or to several for a group.");
+                        color: Theme.text-muted;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                        font-size: Theme.font-md;
+                    }
+                }
+                for m in App.messages: MessageRow {
+                    m: m;
+                    avail: sv.visible-width - 44px;
+                }
+            }
+        }
+        Divider { }
+        composer := Composer { }
+    }
+    if App.people-open && !App.new-chat: PeoplePopup {
+        x: parent.width - self.width - 12px;
+        y: 58px;
+    }
+}
+
+component EmptyState inherits Rectangle {
+    background: Theme.bg;
+    VerticalLayout {
+        alignment: center;
+        spacing: 14px;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 84px;
+                height: 84px;
+                border-radius: 24px;
+                background: @linear-gradient(135deg, Theme.brand-1 0%, Theme.brand-2 55%, Theme.brand-3 100%);
+                drop-shadow-blur: 24px;
+                drop-shadow-color: Theme.brand-2.with-alpha(0.35);
+                Image {
+                    source: Icons.mail;
+                    width: 40px;
+                    height: 40px;
+                    colorize: #ffffff;
+                }
+            }
+        }
+        Text {
+            text: @tr("Your mail, as conversations");
+            color: Theme.text;
+            font-size: 20px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: @tr("Pick someone on the left, or start a new conversation with Ctrl+N.");
+            color: Theme.text-muted;
+            font-size: Theme.font-md;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+component AccountRow inherits Rectangle {
+    in property <AccountItem> acct;
+    property <string> pw;
+    property <bool> change-pw;
+    height: col.preferred-height;
+    col := VerticalLayout {
+        spacing: 6px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                width: 9px;
+                height: 9px;
+                y: (parent.height - 9px) / 2;
+                border-radius: 4.5px;
+                background: root.acct.needs-login ? Theme.danger : root.acct.online ? Theme.success : Theme.text-faint;
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                padding-left: 2px;
+                Text {
+                    text: root.acct.email;
+                    color: Theme.text;
+                    font-size: Theme.font-md;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.acct.message != "" ? root.acct.message : root.acct.online ? @tr("Connected") : @tr("Offline");
+                    color: root.acct.needs-login ? Theme.danger : Theme.text-muted;
+                    font-size: Theme.font-sm;
+                    overflow: elide;
+                }
+            }
+            if root.acct.oauth: Btn {
+                y: (parent.height - self.height) / 2;
+                text: root.acct.needs-login ? @tr("Sign in") : @tr("Sign in again");
+                icon: Icons.log-in;
+                primary: root.acct.needs-login;
+                clicked => { App.sign-in(root.acct.id); }
+            }
+            if !root.acct.oauth: Btn {
+                y: (parent.height - self.height) / 2;
+                text: @tr("Password");
+                icon: Icons.log-in;
+                primary: root.acct.needs-login;
+                clicked => { root.change-pw = !root.change-pw; }
+            }
+            if App.confirm-remove != root.acct.id: IconButton {
+                y: (parent.height - self.height) / 2;
+                size: 32px;
+                icon: Icons.trash;
+                tint: Theme.text-muted;
+                tip: @tr("Remove account");
+                tip-side: 3;
+                clicked => { App.confirm-remove = root.acct.id; }
+            }
+            if App.confirm-remove == root.acct.id: Btn {
+                y: (parent.height - self.height) / 2;
+                text: @tr("Remove");
+                danger: true;
+                clicked => {
+                    App.confirm-remove = "";
+                    App.remove-account(root.acct.id);
+                }
+            }
+        }
+        if !root.acct.oauth && (root.acct.needs-login || root.change-pw): HorizontalLayout {
+            spacing: 8px;
+            padding-left: 19px;
+            Field {
+                text <=> root.pw;
+                placeholder: @tr("Password");
+                input-type: password;
+                clearable: false;
+                accepted => { App.set-password(root.acct.id, root.pw); root.pw = ""; root.change-pw = false; }
+            }
+            Btn {
+                text: @tr("Save");
+                primary: true;
+                clicked => { App.set-password(root.acct.id, root.pw); root.pw = ""; root.change-pw = false; }
+            }
+        }
+    }
+}
+
+component FormRow inherits HorizontalLayout {
+    in property <string> label;
+    spacing: 10px;
+    FieldLabel { text: root.label; width: 86px; }
+    @children
+}
+
+component ServerRow inherits HorizontalLayout {
+    in property <string> label;
+    in-out property <string> host;
+    in-out property <string> port;
+    in-out property <int> security;
+    spacing: 8px;
+    FieldLabel { text: root.label; width: 86px; }
+    Field {
+        text <=> root.host;
+        placeholder: @tr("Server");
+        clearable: false;
+    }
+    Field {
+        width: 70px;
+        text <=> root.port;
+        placeholder: @tr("Port");
+        clearable: false;
+    }
+    Segmented {
+        width: 190px;
+        y: (parent.height - self.height) / 2;
+        items: ["SSL/TLS", "STARTTLS", @tr("None")];
+        selected <=> root.security;
+    }
+}
+
+component AddAccountForm inherits Rectangle {
+    border-radius: Theme.radius;
+    background: Theme.surface-2;
+    border-width: 1px;
+    border-color: Theme.border;
+    height: col.preferred-height;
+    col := VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+        Text {
+            text: @tr("Add an account");
+            color: Theme.text;
+            font-size: Theme.font-md;
+            font-weight: 600;
+        }
+        FormRow {
+            label: @tr("Your name");
+            Field { text <=> App.add-name; placeholder: @tr("Shown to people you write to"); clearable: false; }
+        }
+        FormRow {
+            label: @tr("Email");
+            Field {
+                text <=> App.add-email;
+                placeholder: "you@example.com";
+                clearable: false;
+                accepted => { if App.add-step == 0 { App.add-detect(); } }
+            }
+        }
+        if App.add-step == 1 && App.add-oauth == 0: FormRow {
+            label: @tr("Password");
+            Field {
+                text <=> App.add-password;
+                input-type: password;
+                clearable: false;
+                accepted => { App.add-submit(); }
+            }
+        }
+        if App.add-step == 1: FormRow {
+            label: @tr("Sign-in");
+            Segmented {
+                width: 300px;
+                items: [@tr("Password"), "Google", "Microsoft"];
+                selected <=> App.add-oauth;
+            }
+        }
+        if App.add-step == 1: ServerRow {
+            label: @tr("Incoming (IMAP)");
+            host <=> App.add-imap-host;
+            port <=> App.add-imap-port;
+            security <=> App.add-imap-sec;
+        }
+        if App.add-step == 1: ServerRow {
+            label: @tr("Outgoing (SMTP)");
+            host <=> App.add-smtp-host;
+            port <=> App.add-smtp-port;
+            security <=> App.add-smtp-sec;
+        }
+        if App.add-step == 1: FormRow {
+            label: @tr("User name");
+            Field { text <=> App.add-username; placeholder: @tr("Usually your email address"); clearable: false; }
+        }
+        if App.add-status != "": Text {
+            text: App.add-status;
+            color: App.add-error ? Theme.danger : Theme.text-muted;
+            font-size: Theme.font;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            if App.add-busy: VerticalLayout {
+                alignment: center;
+                Spinner { running: true; }
+            }
+            Btn {
+                text: @tr("Cancel");
+                clicked => {
+                    App.add-open = false;
+                    App.add-step = 0;
+                }
+            }
+            if App.add-step == 0: Btn {
+                text: @tr("Continue");
+                primary: true;
+                enabled: !App.add-busy && App.add-email != "";
+                clicked => { App.add-detect(); }
+            }
+            if App.add-step == 1: Btn {
+                text: App.add-oauth == 0 ? @tr("Add account") : App.add-oauth == 1 ? @tr("Sign in with Google") : @tr("Sign in with Microsoft");
+                icon: App.add-oauth == 0 ? Icons.check : Icons.log-in;
+                primary: true;
+                enabled: !App.add-busy;
+                clicked => { App.add-submit(); }
+            }
+        }
+    }
+}
+
+component SwitchRow inherits HorizontalLayout {
+    in property <string> text;
+    in-out property <bool> checked;
+    callback toggled();
+    spacing: 10px;
+    Rectangle {
+        width: 34px;
+        height: 20px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 10px;
+        background: root.checked ? Theme.accent : Theme.surface-3;
+        animate background { duration: 120ms; }
+        Rectangle {
+            x: root.checked ? parent.width - self.width - 2px : 2px;
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            background: #ffffff;
+            drop-shadow-blur: 2px;
+            drop-shadow-color: #00000040;
+            animate x { duration: 120ms; }
+        }
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.checked = !root.checked;
+                root.toggled();
+            }
+        }
+    }
+    Text {
+        text: root.text;
+        color: Theme.text;
+        font-size: Theme.font;
+        vertical-alignment: center;
+    }
+}
+
+component SettingsDialog inherits Rectangle {
+    background: Theme.backdrop;
+    TouchArea {
+        clicked => { App.settings-open = false; }
+    }
+    Card {
+        width: min(620px, parent.width - 40px);
+        height: min(parent.height - 60px, body.preferred-height + 2px);
+        TouchArea { }
+        ScrollView {
+            content-height: body.preferred-height;
+            content-width: self.visible-width;
+            body := VerticalLayout {
+                width: parent.visible-width;
+                padding: 22px;
+                spacing: 14px;
+                HorizontalLayout {
+                    Text {
+                        text: @tr("Settings");
+                        color: Theme.text;
+                        font-size: 18px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: Icons.x;
+                        clicked => { App.settings-open = false; }
+                    }
+                }
+                Text { text: @tr("Accounts"); color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 600; }
+                if App.accounts.length == 0 && !App.add-open: Text {
+                    text: @tr("No accounts yet. Add one below, or import them from Thunderbird.");
+                    color: Theme.text-muted;
+                    font-size: Theme.font;
+                    wrap: word-wrap;
+                }
+                for a in App.accounts: AccountRow { acct: a; }
+                if App.add-open: AddAccountForm { }
+                if !App.add-open: HorizontalLayout {
+                    alignment: start;
+                    Btn {
+                        text: @tr("Add account");
+                        icon: Icons.user-plus;
+                        clicked => {
+                            App.add-open = true;
+                            App.add-step = 0;
+                        }
+                    }
+                }
+                Divider { }
+                Text { text: @tr("Thunderbird"); color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 600; }
+                Text {
+                    text: App.profile-path != "" ? @tr("Accounts, saved passwords, sign-ins and contact names can be taken from {}", App.profile-path) : @tr("No Thunderbird profile found.");
+                    color: Theme.text-muted;
+                    font-size: Theme.font;
+                    wrap: word-wrap;
+                }
+                if App.profile-path != "": HorizontalLayout {
+                    spacing: 8px;
+                    Field {
+                        text <=> App.tb-password;
+                        input-type: password;
+                        placeholder: @tr("Thunderbird primary password (only if you set one)");
+                        clearable: false;
+                    }
+                    Btn {
+                        text: @tr("Import from Thunderbird");
+                        icon: Icons.refresh;
+                        clicked => { App.reimport(); }
+                    }
+                }
+                Divider { }
+                Text { text: @tr("Notifications"); color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 600; }
+                SwitchRow {
+                    text: @tr("Show a desktop notification for new mail");
+                    checked <=> App.notify-desktop;
+                    toggled => { App.notify-changed(); }
+                }
+                SwitchRow {
+                    text: @tr("Play a sound for new mail");
+                    checked <=> App.notify-sound;
+                    toggled => { App.notify-changed(); }
+                }
+                Text {
+                    text: @tr("Muted and ignored conversations never notify. Muted ones still show unread messages in the Muted tab.");
+                    color: Theme.text-faint;
+                    font-size: Theme.font-sm;
+                    wrap: word-wrap;
+                }
+                Divider { }
+                Text { text: @tr("Appearance"); color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 600; }
+                SwitchRow {
+                    text: @tr("Show website icons for contacts at companies and organisations");
+                    checked <=> App.show-favicons;
+                    toggled => { App.appearance-changed(); }
+                }
+                Text {
+                    text: @tr("Icons are downloaded from the contact's domain (not for Gmail, Outlook and other mail providers) and kept on this computer.");
+                    color: Theme.text-faint;
+                    font-size: Theme.font-sm;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    FieldLabel { text: @tr("Theme"); width: 70px; }
+                    Segmented {
+                        width: 260px;
+                        items: [@tr("System"), @tr("Light"), @tr("Dark")];
+                        selected <=> App.theme-mode;
+                        changed => { App.appearance-changed(); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    FieldLabel { text: @tr("Accent"); width: 70px; }
+                    for c[i] in [#6a4cf5, #1f6fe5, #0d9488, #e8710a, #e11d48]: Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: c;
+                        border-width: App.accent == i ? 3px : 0px;
+                        border-color: Theme.surface;
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
+                            border-width: App.accent == i ? 2px : 0px;
+                            border-color: c;
+                        }
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                App.accent = i;
+                                App.appearance-changed();
+                            }
+                        }
+                    }
+                }
+                Divider { }
+                Text {
+                    text: "Thundergoose " + App.version;
+                    color: Theme.text-faint;
+                    font-size: Theme.font-sm;
+                }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: App.total-unread > 0 ? "Thundergoose (" + App.total-unread + ")" : "Thundergoose";
+    icon: @image-url("icons/app-icon.svg");
+    preferred-width: 1280px;
+    preferred-height: 820px;
+    min-width: 720px;
+    min-height: 460px;
+    background: Theme.bg;
+    default-font-family: "Inter";
+    default-font-size: 12.5px;
+    forward-focus: keys;
+
+    public function focus-search() { sidebar.focus-search-field(); }
+    public function focus-composer() { chat.focus-composer(); }
+    public function focus-to() { chat.focus-to(); }
+
+    keys := FocusScope {
+        key-pressed(e) => {
+            if e.modifiers.control && (e.text == "k" || e.text == "f") {
+                sidebar.focus-search-field();
+                return accept;
+            }
+            if e.modifiers.control && e.text == "n" {
+                App.start-new-chat();
+                return accept;
+            }
+            if e.text == Key.F5 || (e.modifiers.control && e.text == "r") {
+                App.sync-now();
+                return accept;
+            }
+            if e.text == Key.Escape {
+                if App.settings-open { App.settings-open = false; return accept; }
+                if App.people-open { App.people-open = false; return accept; }
+                if App.new-chat { App.cancel-new-chat(); return accept; }
+            }
+            if e.modifiers.alt && e.text == Key.DownArrow {
+                App.select-peer(min(App.peers.length - 1, App.selected + 1));
+                return accept;
+            }
+            if e.modifiers.alt && e.text == Key.UpArrow {
+                App.select-peer(max(0, App.selected - 1));
+                return accept;
+            }
+            reject
+        }
+        HorizontalLayout {
+            sidebar := Sidebar {
+                min-width: 300px;
+                preferred-width: 360px;
+                max-width: 420px;
+                horizontal-stretch: 0;
+            }
+            VDivider { }
+            Rectangle {
+                horizontal-stretch: 1;
+                EmptyState {
+                    visible: !App.has-chat && !App.new-chat;
+                }
+                chat := ChatView {
+                    visible: App.has-chat || App.new-chat;
+                }
+            }
+        }
+    }
+
+    if App.settings-open: SettingsDialog { }
+
+    if App.toast != "": Rectangle {
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - 24px;
+        width: min(root.width - 40px, trow.preferred-width + 24px);
+        height: 40px;
+        border-radius: 10px;
+        background: App.toast-error ? Theme.danger : (Theme.dark ? #f0f0f5 : #1f2029);
+        drop-shadow-blur: 12px;
+        drop-shadow-color: #00000055;
+        trow := HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 6px;
+            spacing: 8px;
+            Text {
+                text: App.toast;
+                color: App.toast-error ? #ffffff : (Theme.dark ? #15151a : #f5f5fa);
+                font-size: Theme.font;
+                font-weight: 500;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            IconButton {
+                y: 6px;
+                size: 28px;
+                icon-size: 13px;
+                icon: Icons.x;
+                tint: App.toast-error ? #ffffff : (Theme.dark ? #15151a : #f5f5fa);
+                clicked => { App.dismiss-toast(); }
+            }
+        }
+    }
+
+    // Tooltip layer
+    if Tip.shown: Rectangle {
+        x: max(4px, min(Tip.x, root.width - self.width - 4px));
+        y: max(4px, min(Tip.y, root.height - self.height - 4px));
+        width: tt.preferred-width + 16px;
+        height: 24px;
+        border-radius: 6px;
+        background: Theme.dark ? #f0f0f5 : #1f2029;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: #00000044;
+        tt := Text {
+            text: Tip.text;
+            color: Theme.dark ? #15151a : #f5f5fa;
+            font-size: Theme.font-sm + 0.5px;
+            font-weight: 500;
+        }
+    }
+}

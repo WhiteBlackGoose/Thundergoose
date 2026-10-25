@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Thundergoose
+GenericName=Mail Client
+Comment=Email as conversations with people
+Exec=thundergoose
+Icon=thundergoose
+Terminal=false
+Categories=Network;Email;
+MimeType=x-scheme-handler/mailto;
+StartupWMClass=thundergoose

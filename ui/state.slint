@@ -1,0 +1,207 @@
+export global Tip {
+    in-out property <string> text;
+    in-out property <length> x;
+    in-out property <length> y;
+    in-out property <bool> shown;
+    public function show(t: string, px: length, py: length) {
+        text = t;
+        x = px;
+        y = py;
+        shown = true;
+    }
+    public function hide() {
+        shown = false;
+    }
+}
+
+export struct PeerItem {
+    key: string,
+    title: string,
+    snippet: string,
+    time: string,
+    unread: int,
+    initials: string,
+    hue: color,
+    group: bool,
+    outgoing: bool,
+    is-new: bool,
+    favorite: bool,
+    muted: bool,
+    ignored: bool,
+    /// Header shown above this row ("Favorites", "Chats").
+    section: string,
+    /// Website icon of the contact's organisation.
+    icon: image,
+    has-icon: bool,
+    /// The "Yourself" conversation.
+    me: bool,
+}
+
+export struct AttachmentItem {
+    name: string,
+    size: string,
+    index: int,
+    /// Decoded picture for image attachments.
+    preview: image,
+    has-preview: bool,
+}
+
+export struct MessageItem {
+    id: int,
+    outgoing: bool,
+    sender: string,
+    hue: color,
+    show-sender: bool,
+    subject: string,
+    text: string,
+    can-expand: bool,
+    expanded: bool,
+    time: string,
+    full-time: string,
+    day: string,
+    via: string,
+    loading: bool,
+    has-html: bool,
+    unread: bool,
+    attachments: [AttachmentItem],
+    /// Set when group mail shows up in a one-person conversation.
+    group-label: string,
+    group-key: string,
+}
+
+export struct AccountItem {
+    id: string,
+    email: string,
+    label: string,
+    hue: color,
+    online: bool,
+    busy: bool,
+    needs-login: bool,
+    oauth: bool,
+    message: string,
+}
+
+export struct Participant {
+    name: string,
+    addr: string,
+}
+
+export global App {
+    // Sidebar
+    in property <[PeerItem]> peers;
+    in property <int> selected: -1;
+    in-out property <string> search;
+    in property <[AccountItem]> accounts;
+    in-out property <int> account-filter: -1;
+    in property <int> total-unread;
+    in property <bool> syncing;
+    in-out property <int> tab;
+    in property <int> main-unread;
+    in property <int> muted-unread;
+    in property <int> muted-count;
+    in property <int> ignored-count;
+    in property <string> sync-text;
+
+    // Conversation
+    in property <bool> has-chat;
+    in property <string> chat-title;
+    in property <string> chat-subtitle;
+    in property <string> chat-initials;
+    in property <color> chat-hue;
+    in property <bool> chat-group;
+    in property <image> chat-icon;
+    in property <bool> chat-has-icon;
+    in property <bool> chat-me;
+    in property <bool> chat-favorite;
+    in property <bool> chat-muted;
+    in property <bool> chat-ignored;
+    in property <[Participant]> chat-people;
+    in property <[MessageItem]> messages;
+    in property <bool> has-earlier;
+    in property <int> scroll-token;
+
+    // Composer
+    in-out property <string> draft-text;
+    in-out property <string> draft-subject;
+    in property <string> draft-from;
+    in property <bool> draft-from-choosable;
+    /// In the "Yourself" conversation: which own address the mail goes to.
+    in property <bool> draft-self;
+    in property <string> draft-to;
+    in property <[string]> own-addresses;
+    in property <[string]> draft-attachments;
+    in property <bool> sending;
+    in property <bool> new-chat;
+    in-out property <string> new-chat-to;
+
+    // Overlays
+    in-out property <bool> settings-open;
+    in-out property <bool> people-open;
+    in property <string> toast;
+    in property <bool> toast-error;
+    in-out property <int> accent;
+    in-out property <int> theme-mode;
+    in property <string> profile-path;
+    in property <string> version;
+    in-out property <bool> notify-desktop;
+    in-out property <bool> notify-sound;
+    in-out property <bool> show-favicons: true;
+
+    // Account setup
+    in-out property <bool> add-open;
+    in-out property <int> add-step;
+    in-out property <string> add-name;
+    in-out property <string> add-email;
+    in-out property <string> add-password;
+    in-out property <string> add-username;
+    in-out property <string> add-imap-host;
+    in-out property <string> add-imap-port;
+    in-out property <int> add-imap-sec;
+    in-out property <string> add-smtp-host;
+    in-out property <string> add-smtp-port;
+    in-out property <int> add-smtp-sec;
+    /// 0 password, 1 Google, 2 Microsoft
+    in-out property <int> add-oauth;
+    in property <bool> add-busy;
+    in property <string> add-status;
+    in property <bool> add-error;
+    in-out property <string> tb-password;
+    in-out property <string> confirm-remove;
+    in-out property <bool> text-focus;
+
+    callback select-peer(int);
+    callback search-edited(string);
+    callback search-accepted();
+    callback filter(int);
+    callback load-earlier();
+    callback toggle-message(int);
+    callback open-html(int);
+    callback open-attachment(int, int);
+    callback save-attachment(int, int);
+    callback copy(string);
+    callback send();
+    callback attach();
+    callback remove-attachment(int);
+    callback choose-from(int);
+    callback choose-to(int);
+    callback start-new-chat();
+    callback new-chat-confirm();
+    callback cancel-new-chat();
+    callback mark-unread();
+    callback sync-now();
+    callback sign-in(string);
+    callback set-password(string, string);
+    callback reimport();
+    callback appearance-changed();
+    callback dismiss-toast();
+    callback write-to(string);
+    callback set-tab(int);
+    callback open-chat(string);
+    /// Toggle favorite (0), muted (1) or ignored (2) of the row at index, or of the open chat with -1.
+    callback toggle-flag(int, int);
+    callback mark-read-at(int);
+    callback notify-changed();
+    callback add-detect();
+    callback add-submit();
+    callback remove-account(string);
+}

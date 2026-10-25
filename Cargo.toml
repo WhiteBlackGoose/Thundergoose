@@ -1,0 +1,56 @@
+[package]
+name = "thundergoose"
+version = "0.1.0"
+edition = "2021"
+description = "An email client that treats mail as conversations with people"
+license = "MIT"
+
+[[bin]]
+name = "thundergoose"
+path = "src/main.rs"
+
+[dependencies]
+slint = { version = "1.18", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "renderer-software", "compat-1-2", "accessibility"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
+imap = { version = "3.0.0-alpha.15", default-features = false, features = ["rustls-tls"] }
+imap-proto = "0.16"
+rustls-connector = { version = "0.19", default-features = false, features = ["native-certs", "webpki-roots-certs"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "hostname", "rustls-tls"] }
+mail-parser = { version = "0.11", features = ["full_encoding"] }
+ureq = { version = "3", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+sha1 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+pbkdf2 = "0.12"
+aes = "0.8"
+des = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+getrandom = "0.3"
+chrono = "0.4"
+directories = "6"
+rfd = "0.15"
+open = "5"
+notify-rust = "4"
+arboard = { version = "3", features = ["wayland-data-control"] }
+html-escape = "0.2"
+image = { version = "0.25", default-features = false, features = ["png", "ico", "jpeg", "gif", "webp", "bmp"] }
+
+[build-dependencies]
+slint-build = "1.18"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
