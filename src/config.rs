@@ -143,7 +143,7 @@ impl Paths {
     pub fn new() -> Self {
         let data = std::env::var_os("THUNDERGOOSE_HOME")
             .map(PathBuf::from)
-            .or_else(|| directories::ProjectDirs::from("", "", "Thundergoose").map(|d| d.data_dir().to_path_buf()))
+            .or_else(crate::platform::data_dir)
             .unwrap_or_else(|| PathBuf::from(".thundergoose"));
         std::fs::create_dir_all(&data).ok();
         Paths { data }

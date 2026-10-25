@@ -83,7 +83,8 @@ export struct MessageItem {
     /// The HTML version, rendered; shown instead of the text when `html-on`.
     html: image,
     html-on: bool,
-    /// Height of the rendering in CSS pixels (its width is 620).
+    /// Size of the rendering in CSS pixels.
+    html-width: float,
     html-height: float,
     /// Remote images were left out.
     html-blocked: bool,
@@ -135,6 +136,9 @@ export global App {
     in-out property <int> account-filter: -1;
     in property <bool> unread-only;
     in-out property <length> sidebar-width: 360px;
+    /// Phone-sized window: one pane at a time, views and accounts in a drawer.
+    in-out property <bool> narrow;
+    in-out property <bool> drawer-open;
     in property <int> total-unread;
     in property <bool> syncing;
     in-out property <int> tab;
@@ -237,6 +241,8 @@ export global App {
     callback set-unread-only(bool);
     /// The sidebar was dragged to a new width.
     callback sidebar-resized();
+    /// Back from a conversation to the list (narrow layout).
+    callback go-back();
     callback load-earlier();
     callback toggle-message(int);
     callback open-html(int);

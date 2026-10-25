@@ -8,12 +8,18 @@ authors = ["WhiteBlackGoose"]
 repository = "https://github.com/WhiteBlackGoose/Thundergoose"
 readme = "README.md"
 
+[workspace]
+members = [".", "android"]
+
+[lib]
+name = "thundergoose"
+path = "src/lib.rs"
+
 [[bin]]
 name = "thundergoose"
 path = "src/main.rs"
 
 [dependencies]
-slint = { version = "1.18", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "renderer-software", "compat-1-2", "accessibility"] }
 rusqlite = { version = "0.41", features = ["bundled"] }
 imap = { version = "3.0.0-alpha.15", default-features = false, features = ["rustls-tls"] }
 imap-proto = "0.16"
@@ -34,11 +40,6 @@ des = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 getrandom = "0.3"
 chrono = "0.4"
-directories = "6"
-rfd = "0.15"
-open = "5"
-notify-rust = "4"
-arboard = { version = "3", features = ["wayland-data-control"] }
 html-escape = "0.2"
 blitz-html = "0.3.0-beta.4"
 blitz-dom = { version = "0.3.0-beta.4", features = ["floats"] }
@@ -47,6 +48,21 @@ blitz-traits = "0.3.0-beta.4"
 anyrender = "0.14"
 anyrender_vello_cpu = "0.18"
 image = { version = "0.25", default-features = false, features = ["png", "ico", "jpeg", "gif", "webp", "bmp"] }
+
+# The desktop: windows through winit, desktop notifications, file dialogs, the clipboard.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+slint = { version = "1.18", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "renderer-software", "compat-1-2", "accessibility"] }
+rfd = "0.15"
+open = "5"
+notify-rust = "4"
+arboard = { version = "3", features = ["wayland-data-control"] }
+directories = "6"
+
+# Android: Slint's activity backend; the rest goes through the Java framework.
+[target.'cfg(target_os = "android")'.dependencies]
+slint = { version = "1.18", default-features = false, features = ["std", "backend-android-activity-06", "renderer-software", "compat-1-2"] }
+jni = "0.21"
+ndk-context = "0.1"
 
 [package.metadata.deb]
 maintainer = "WhiteBlackGoose"

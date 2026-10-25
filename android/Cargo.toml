@@ -1,0 +1,43 @@
+[package]
+name = "thundergoose-android"
+version = "1.0.0"
+edition = "2021"
+description = "Thundergoose for Android"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+thundergoose = { path = ".." }
+
+# Built with cargo-apk: `cargo apk build --release -p thundergoose-android`.
+[package.metadata.android]
+package = "io.github.whiteblackgoose.thundergoose"
+apk_name = "Thundergoose"
+build_targets = ["aarch64-linux-android"]
+resources = "res"
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 34
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.POST_NOTIFICATIONS"
+
+[package.metadata.android.application]
+label = "Thundergoose"
+icon = "@mipmap/ic_launcher"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar"
+
+[package.metadata.android.application.activity]
+# Rotating or folding keeps the app running instead of restarting it.
+config_changes = "orientation|screenSize|screenLayout|keyboardHidden|keyboard|uiMode|density|smallestScreenSize"
+launch_mode = "singleTop"
+# The keyboard pushes the composer up instead of covering it.
+window_soft_input_mode = "adjustResize"

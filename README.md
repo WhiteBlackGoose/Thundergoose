@@ -124,6 +124,23 @@ you mark as spam. They never notify.</td>
 </tr>
 </table>
 
+### On phones
+
+<table>
+<tr>
+<td width="25%"><img src="docs/phone-list.png" alt="Conversation list on a phone"></td>
+<td width="25%"><img src="docs/phone-drawer.png" alt="The drawer with views and accounts"></td>
+<td width="25%"><img src="docs/phone-chat.png" alt="A conversation on a phone"></td>
+<td width="25%"><img src="docs/phone-html.png" alt="An HTML mail on a phone"></td>
+</tr>
+</table>
+
+On a phone (or any window narrower than 700 px) Thundergoose shows one thing at a time, like
+Telegram: the list of people, or the conversation with one of them, with a back button. The
+views (Chats, Muted, Ignored, Spam, Unread only), your accounts and Settings slide in from the
+left, like in K-9 Mail. HTML mail is laid out at the phone's width, or zoomed out when it has a
+fixed width.
+
 <p align="center"><img src="docs/settings-light.png" alt="Settings: accounts, notifications, appearance" width="70%"></p>
 
 ## Install
@@ -136,6 +153,7 @@ Download the latest build from [Releases](https://github.com/WhiteBlackGoose/Thu
 | Fedora | `…-fedora-x86_64.rpm` | `sudo dnf install ./Thundergoose-*.rpm` |
 | Windows 10/11 | `…-windows-x64-setup.exe` | Installer (no admin rights needed); a portable `.exe` is attached too |
 | macOS 11+ (Apple silicon and Intel) | `…-macos-universal.dmg` | Not notarized: the first time, right-click the app → *Open* |
+| Android 8+ (64-bit ARM) | `…-android-arm64.apk` | Allow installing from your browser or file manager, then open the file |
 | NixOS / Nix | | `nix run github:WhiteBlackGoose/Thundergoose` |
 
 ## Try it
@@ -151,6 +169,13 @@ libraries. `nix build` produces a wrapped binary with a desktop file and icon.
 
 `thundergoose --screenshots docs` renders the pictures in this README from the demo data,
 without a display.
+
+**Android.** The app is the same library (`src/lib.rs`); `android/` only holds the entry point
+and the APK settings. Build with the Android SDK and NDK installed (`ANDROID_HOME`,
+`ANDROID_NDK_ROOT`): `cargo install cargo-apk` and `cargo apk build --release -p
+thundergoose-android`. Not there yet on Android: attaching and saving files, opening
+attachments, syncing while the app is closed, and the Thunderbird import (there is no
+Thunderbird on the phone).
 
 **Releases** are built by [`.github/workflows/release.yml`](.github/workflows/release.yml):
 every push to `main` builds all packages as workflow artifacts, and pushing a tag `vX.Y.Z`

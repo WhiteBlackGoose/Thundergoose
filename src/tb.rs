@@ -27,7 +27,7 @@ pub fn open_sqlite_copy(path: &Path) -> rusqlite::Result<rusqlite::Connection> {
 
 fn roots() -> Vec<PathBuf> {
     let mut v = Vec::new();
-    let home = directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf()).unwrap_or_default();
+    let home = crate::platform::home_dir().unwrap_or_default();
     if cfg!(target_os = "windows") {
         if let Some(app) = std::env::var_os("APPDATA") {
             v.push(PathBuf::from(app).join("Thunderbird"));

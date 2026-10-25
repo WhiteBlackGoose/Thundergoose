@@ -14,8 +14,9 @@ use blitz_traits::net::{Bytes, NetHandler, NetProvider, Request};
 use blitz_traits::shell::{ColorScheme, Viewport};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
-/// Mail is laid out at the width newsletters are designed for.
+/// Mail is laid out at the width newsletters are designed for, or narrower on phones.
 pub const CSS_WIDTH: f32 = 620.0;
+pub const MIN_CSS_WIDTH: f32 = 280.0;
 /// A collapsed mail is cut here; "Show full message" renders everything.
 const CUT_HEIGHT: f32 = 1500.0;
 const MAX_HEIGHT: f32 = 12000.0;
@@ -31,6 +32,7 @@ pub struct Link {
 pub struct Rendered {
     pub pixels: SharedPixelBuffer<Rgba8Pixel>,
     pub links: Vec<Link>,
+    pub css_width: f32,
     pub css_height: f32,
     /// The mail asked for remote content that wasn't loaded.
     pub blocked: bool,
@@ -351,20 +353,43 @@ fn presentational_hints(doc: &mut BaseDocument) {
     }
 }
 
+/// The right edge of the widest box: more than the page width when the mail has fixed widths.
+fn content_width(doc: &BaseDocument) -> f32 {
+    let Ok(ids) = doc.query_selector_all("body *") else { return 0.0 };
+    ids.iter()
+        .filter_map(|id| doc.get_node(*id))
+        .map(|n| n.absolute_position(0.0, 0.0).x + n.final_layout().size.width)
+        .fold(0.0, f32::max)
+}
+
 /// A laid-out HTML mail, kept alive so text in it can be selected.
 pub struct Page {
     doc: HtmlDocument,
     scale: f32,
+    css_width: f32,
     css_height: f32,
 }
 
 impl Page {
     /// Lays out `html` at `scale` (physical pixels per CSS pixel). `full` keeps quoted history
     /// and doesn't cut long mail.
-    pub fn load(html: &str, inline: HashMap<String, Vec<u8>>, remote: bool, scale: f32, full: bool) -> (Page, Rendered) {
+    pub fn load(html: &str, inline: HashMap<String, Vec<u8>>, remote: bool, scale: f32, full: bool, css_width: f32) -> (Page, Rendered) {
+        let css_width = css_width.clamp(MIN_CSS_WIDTH, CSS_WIDTH);
+        let (page, rendered, content) = Self::layout(html, inline.clone(), remote, scale, full, css_width);
+        // Mail with a fixed width wider than a phone: lay it out at its own width and let the
+        // picture be shown smaller, as phone mail apps zoom out.
+        if content > css_width + 1.0 && css_width < CSS_WIDTH {
+            let (page, rendered, _) = Self::layout(html, inline, remote, scale, full, content.min(CSS_WIDTH));
+            return (page, rendered);
+        }
+        (page, rendered)
+    }
+
+    /// Lays out at one width; also returns how wide the content really is.
+    fn layout(html: &str, inline: HashMap<String, Vec<u8>>, remote: bool, scale: f32, full: bool, css_width: f32) -> (Page, Rendered, f32) {
         let pending = Arc::new(AtomicUsize::new(0));
         let provider = Arc::new(Provider { inline, remote, blocked: AtomicBool::new(false), pending: pending.clone() });
-        let width = (CSS_WIDTH * scale).round() as u32;
+        let width = (css_width * scale).round() as u32;
         let mut doc = HtmlDocument::from_html(
             html,
             DocumentConfig { viewport: Some(Viewport::new(width, 800, scale, ColorScheme::Light)), net_provider: Some(provider.clone()), ..Default::default() },
@@ -382,14 +407,15 @@ impl Page {
         let limit = if full { MAX_HEIGHT } else { CUT_HEIGHT };
         let css_height = natural.min(limit);
         let links = links(&doc, css_height);
-        let mut page = Page { doc, scale, css_height };
+        let mut page = Page { doc, scale, css_width, css_height };
         let pixels = page.paint();
-        let rendered = Rendered { pixels, links, css_height, blocked: provider.blocked.load(Ordering::Relaxed), quoted, cut: natural > limit };
-        (page, rendered)
+        let rendered = Rendered { pixels, links, css_width, css_height, blocked: provider.blocked.load(Ordering::Relaxed), quoted, cut: natural > limit };
+        let content = content_width(&page.doc);
+        (page, rendered, content)
     }
 
     pub fn paint(&mut self) -> SharedPixelBuffer<Rgba8Pixel> {
-        let width = (CSS_WIDTH * self.scale).round() as u32;
+        let width = (self.css_width * self.scale).round() as u32;
         let height = (self.css_height * self.scale).ceil() as u32;
         let doc = &mut self.doc;
         let rgba = anyrender::render_to_buffer::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(|scene| blitz_paint::paint_scene(scene, doc, self.scale as f64, width, height, 0, 0), width, height);

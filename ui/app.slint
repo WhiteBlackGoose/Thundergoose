@@ -260,6 +260,11 @@ component Sidebar inherits Rectangle {
             padding-left: 14px;
             padding-right: 10px;
             spacing: 2px;
+            if App.narrow: IconButton {
+                icon: Icons.menu;
+                tip: @tr("Views and accounts");
+                clicked => { App.drawer-open = true; }
+            }
             Brand { }
             Rectangle { horizontal-stretch: 1; }
             if App.syncing: VerticalLayout {
@@ -277,7 +282,7 @@ component Sidebar inherits Rectangle {
                 tip: @tr("Check for new mail") + "  F5";
                 clicked => { App.sync-now(); }
             }
-            IconButton {
+            if !App.narrow: IconButton {
                 icon: Icons.settings;
                 tip: @tr("Settings");
                 clicked => { App.settings-open = true; }
@@ -297,7 +302,7 @@ component Sidebar inherits Rectangle {
         // Account filter, only worth having with more than one account. Scrolls sideways when
         // the chips don't fit; the Flickable takes its size from a plain Rectangle, because
         // inside the layout directly it came out too narrow and cut the chips off (issue #1).
-        if App.accounts.length > 1: Rectangle {
+        if App.accounts.length > 1 && !App.narrow: Rectangle {
             height: 28px;
             Flickable {
                 width: parent.width;
@@ -322,7 +327,20 @@ component Sidebar inherits Rectangle {
                 }
             }
         }
-        HorizontalLayout {
+        // In the narrow layout the views live in the drawer; say which one is showing.
+        if App.narrow && (App.tab != 0 || App.account-filter >= 0 || App.unread-only): HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            Text {
+                text: [@tr("Chats"), @tr("Muted"), @tr("Ignored"), @tr("Spam")][App.tab]
+                    + (App.account-filter >= 0 ? " · " + App.accounts[App.account-filter].label : "")
+                    + (App.unread-only ? " · " + @tr("unread only") : "");
+                color: Theme.accent;
+                font-size: Theme.font-sm;
+                font-weight: 600;
+            }
+        }
+        if !App.narrow: HorizontalLayout {
             padding-left: 12px;
             padding-right: 12px;
             Segmented {
@@ -506,9 +524,9 @@ component ImagePreview inherits Rectangle {
 component HtmlCard inherits Rectangle {
     in property <MessageItem> m;
     in property <length> max-w;
-    property <string> url: ta.has-hover ? App.link-at(root.m.id, ta.mouse-x / root.width * 620, ta.mouse-y / root.width * 620) : "";
-    width: min(root.max-w, 620px);
-    height: self.width * root.m.html-height / 620;
+    property <string> url: ta.has-hover ? App.link-at(root.m.id, root.css(ta.mouse-x), root.css(ta.mouse-y)) : "";
+    width: min(root.max-w, root.m.html-width * 1px);
+    height: self.width * root.m.html-height / root.m.html-width;
     border-radius: 10px;
     clip: true;
     background: #ffffff;
@@ -523,7 +541,7 @@ component HtmlCard inherits Rectangle {
     property <length> press-x;
     property <length> press-y;
     property <bool> dragged;
-    function css(v: length) -> float { return v / root.width * 620; }
+    function css(v: length) -> float { return v / root.width * root.m.html-width; }
     fs := FocusScope {
         key-pressed(e) => {
             if (e.modifiers.control || e.modifiers.meta) && e.text == "c" {
@@ -596,7 +614,7 @@ component MessageRow inherits VerticalLayout {
     HorizontalLayout {
         alignment: root.m.outgoing ? end : start;
         Rectangle {
-            max-width: root.avail * 0.76;
+            max-width: root.avail * (App.narrow ? 0.9 : 0.76);
             min-width: 120px;
             property <color> base: root.m.outgoing ? Theme.bubble-out : Theme.bubble-in;
             background: self.colored ? self.base.mix(root.m.account-color, 0.9) : self.base;
@@ -660,17 +678,17 @@ component MessageRow inherits VerticalLayout {
                         colorize: Theme.text-faint;
                     }
                     Text {
-                        text: @tr("Remote images blocked");
+                        text: App.narrow ? @tr("Images blocked") : @tr("Remote images blocked");
                         color: Theme.text-muted;
                         font-size: Theme.font-sm;
                         vertical-alignment: center;
                     }
                     LinkText {
-                        text: @tr("Load images");
+                        text: App.narrow ? @tr("Load") : @tr("Load images");
                         clicked => { App.load-images(root.m.id, false); }
                     }
                     LinkText {
-                        text: @tr("Always from this sender");
+                        text: App.narrow ? @tr("Always") : @tr("Always from this sender");
                         clicked => { App.load-images(root.m.id, true); }
                     }
                 }
@@ -985,8 +1003,8 @@ component Composer inherits Rectangle {
     background: Theme.surface;
     public function focus-text() { te.focus(); }
     VerticalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
+        padding-left: App.narrow ? 8px : 14px;
+        padding-right: App.narrow ? 8px : 14px;
         padding-top: 10px;
         padding-bottom: 12px;
         spacing: 8px;
@@ -1002,7 +1020,7 @@ component Composer inherits Rectangle {
                 picked(i) => { App.choose-from(i); }
             }
             LinkText {
-                y: (parent.height - self.height) / 2;
+                vertical-alignment: center;
                 text: App.cc-open ? @tr("No Cc/Bcc") : @tr("Cc/Bcc");
                 subtle: !App.cc-open;
                 clicked => {
@@ -1022,13 +1040,21 @@ component Composer inherits Rectangle {
                 tip: @tr("Which of your addresses gets it");
                 picked(i) => { App.choose-to(i); }
             }
-            Field {
+            if !App.narrow: Field {
                 height: 30px;
                 text <=> App.draft-subject;
                 placeholder: @tr("Subject");
                 clearable: false;
                 font-size: Theme.font;
             }
+        }
+        // On phones the subject gets its own line.
+        if App.narrow: Field {
+            height: 34px;
+            text <=> App.draft-subject;
+            placeholder: @tr("Subject");
+            clearable: false;
+            font-size: Theme.font;
         }
         if App.cc-open: HorizontalLayout {
             spacing: 8px;
@@ -1119,9 +1145,18 @@ component ChatHeader inherits Rectangle {
     height: 62px;
     background: Theme.surface;
     HorizontalLayout {
-        padding-left: 18px;
-        padding-right: 12px;
-        spacing: 12px;
+        padding-left: App.narrow ? 4px : 18px;
+        padding-right: App.narrow ? 4px : 12px;
+        spacing: App.narrow ? 6px : 12px;
+        if App.narrow: VerticalLayout {
+            alignment: center;
+            IconButton {
+                size: 40px;
+                icon-size: 20px;
+                icon: Icons.back;
+                clicked => { App.go-back(); }
+            }
+        }
         VerticalLayout {
             alignment: center;
             Avatar {
@@ -1165,7 +1200,7 @@ component ChatHeader inherits Rectangle {
                 }
             }
         }
-        VerticalLayout {
+        if !App.narrow: VerticalLayout {
             alignment: center;
             IconButton {
                 icon: App.chat-favorite ? Icons.star-filled : Icons.star;
@@ -1175,7 +1210,7 @@ component ChatHeader inherits Rectangle {
                 clicked => { App.toggle-flag(-1, 0); }
             }
         }
-        VerticalLayout {
+        if !App.narrow: VerticalLayout {
             alignment: center;
             IconButton {
                 icon: App.chat-muted ? Icons.bell-off : Icons.bell;
@@ -1185,7 +1220,7 @@ component ChatHeader inherits Rectangle {
                 clicked => { App.toggle-flag(-1, 1); }
             }
         }
-        VerticalLayout {
+        if !App.narrow: VerticalLayout {
             alignment: center;
             IconButton {
                 icon: Icons.ban;
@@ -1195,7 +1230,7 @@ component ChatHeader inherits Rectangle {
                 clicked => { App.toggle-flag(-1, 2); }
             }
         }
-        VerticalLayout {
+        if !App.narrow: VerticalLayout {
             alignment: center;
             IconButton {
                 icon: Icons.spam;
@@ -1205,13 +1240,20 @@ component ChatHeader inherits Rectangle {
                 clicked => { App.toggle-flag(-1, 3); }
             }
         }
-        VerticalLayout {
+        if !App.narrow: VerticalLayout {
             alignment: center;
             IconButton {
                 icon: Icons.mail;
                 tip: @tr("Mark as unread");
                 tip-side: 3;
                 clicked => { App.mark-unread(); }
+            }
+        }
+        if App.narrow: VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: Icons.more;
+                clicked => { menu.show(); }
             }
         }
         VerticalLayout {
@@ -1222,6 +1264,44 @@ component ChatHeader inherits Rectangle {
                 tip-side: 3;
                 active: App.people-open;
                 clicked => { App.people-open = !App.people-open; }
+            }
+        }
+    }
+    menu := PopupWindow {
+        x: root.width - 250px;
+        y: root.height - 4px;
+        width: 240px;
+        height: items.preferred-height + 2px;
+        Card {
+            items := VerticalLayout {
+                padding: 6px;
+                for it[i] in [
+                    App.chat-favorite ? @tr("Remove from favorites") : @tr("Add to favorites"),
+                    App.chat-muted ? @tr("Unmute") : @tr("Mute"),
+                    App.chat-ignored ? @tr("Stop ignoring") : @tr("Ignore"),
+                    App.chat-spam ? @tr("Not spam") : @tr("Mark as spam"),
+                    @tr("Mark as unread"),
+                ]: Rectangle {
+                    height: 40px;
+                    border-radius: 7px;
+                    background: mta.has-hover ? Theme.hover : transparent;
+                    mta := TouchArea {
+                        clicked => {
+                            if i < 4 {
+                                App.toggle-flag(-1, i);
+                            } else {
+                                App.mark-unread();
+                            }
+                        }
+                    }
+                    Text {
+                        x: 12px;
+                        text: it;
+                        color: Theme.text;
+                        font-size: Theme.font-md;
+                        vertical-alignment: center;
+                    }
+                }
             }
         }
     }
@@ -1403,8 +1483,8 @@ component ChatView inherits Rectangle {
                 width: sv.visible-width;
                 height: max(sv.visible-height, self.preferred-height);
                 alignment: end;
-                padding-left: 22px;
-                padding-right: 22px;
+                padding-left: App.narrow ? 8px : 22px;
+                padding-right: App.narrow ? 8px : 22px;
                 padding-top: 12px;
                 padding-bottom: 14px;
                 spacing: 7px;
@@ -1430,7 +1510,7 @@ component ChatView inherits Rectangle {
                 }
                 for m in App.messages: MessageRow {
                     m: m;
-                    avail: sv.visible-width - 44px;
+                    avail: sv.visible-width - (App.narrow ? 16px : 44px);
                 }
             }
         }
@@ -1856,7 +1936,7 @@ component SettingsDialog inherits Rectangle {
         clicked => { App.settings-open = false; }
     }
     Card {
-        width: min(620px, parent.width - 40px);
+        width: min(620px, parent.width - (App.narrow ? 12px : 40px));
         height: min(parent.height - 60px, body.preferred-height + 2px);
         TouchArea { }
         ScrollView {
@@ -2070,13 +2150,196 @@ component SettingsDialog inherits Rectangle {
     }
 }
 
+component DrawerRow inherits Rectangle {
+    in property <image> icon;
+    in property <string> text;
+    in property <string> detail;
+    in property <color> dot: transparent;
+    in property <int> count;
+    in property <bool> active;
+    callback clicked();
+    height: root.detail != "" ? 52px : 44px;
+    border-radius: 10px;
+    background: root.active ? Theme.accent-soft : ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 14px;
+        if root.dot != transparent: Rectangle {
+            width: 10px;
+            height: 10px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 5px;
+            background: root.dot;
+        }
+        if root.dot == transparent: Image {
+            source: root.icon;
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            colorize: root.active ? Theme.accent : Theme.text-muted;
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: root.text;
+                color: root.active ? Theme.accent : Theme.text;
+                font-size: Theme.font-md;
+                font-weight: root.active ? 600 : 500;
+                overflow: elide;
+            }
+            if root.detail != "": Text {
+                text: root.detail;
+                color: Theme.text-muted;
+                font-size: Theme.font-sm;
+                overflow: elide;
+            }
+        }
+        if root.count > 0: Text {
+            text: root.count;
+            color: root.active ? Theme.accent : Theme.text-muted;
+            font-size: Theme.font-sm;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+}
+
+/// The views and accounts, sliding in from the left in the narrow layout (like K-9 Mail).
+component Drawer inherits Rectangle {
+    property <length> panel-width: min(320px, root.width * 0.85);
+    // The backdrop fades in, the panel slides.
+    Rectangle {
+        background: Theme.backdrop;
+        opacity: App.drawer-open ? 1 : 0;
+        visible: self.opacity > 0;
+        animate opacity { duration: 180ms; }
+        TouchArea {
+            clicked => { App.drawer-open = false; }
+        }
+    }
+    Rectangle {
+        x: App.drawer-open ? 0px : - root.panel-width - 20px;
+        animate x { duration: 200ms; easing: ease-out; }
+        width: root.panel-width;
+        background: Theme.surface;
+        drop-shadow-blur: 18px;
+        drop-shadow-color: Theme.shadow.with-alpha(0.35);
+        TouchArea { }
+        Flickable {
+            content-height: col.preferred-height;
+            content-width: self.width;
+            col := VerticalLayout {
+                width: parent.width;
+                padding: 12px;
+                spacing: 2px;
+                HorizontalLayout {
+                    padding: 6px;
+                    padding-bottom: 14px;
+                    Brand { }
+                }
+                Text {
+                    x: 10px;
+                    text: @tr("Views");
+                    color: Theme.text-faint;
+                    font-size: Theme.font-sm;
+                    font-weight: 600;
+                    height: 26px;
+                    vertical-alignment: center;
+                }
+                for v[i] in [
+                    { name: @tr("Chats"), icon: Icons.chats, count: App.main-unread },
+                    { name: @tr("Muted"), icon: Icons.bell-off, count: App.muted-unread },
+                    { name: @tr("Ignored"), icon: Icons.ban, count: App.ignored-count },
+                    { name: @tr("Spam"), icon: Icons.spam, count: App.spam-count },
+                ]: DrawerRow {
+                    icon: v.icon;
+                    text: v.name;
+                    count: v.count;
+                    active: App.tab == i;
+                    clicked => {
+                        App.set-tab(i);
+                        App.drawer-open = false;
+                    }
+                }
+                DrawerRow {
+                    icon: Icons.mail;
+                    text: @tr("Unread only");
+                    active: App.unread-only;
+                    clicked => {
+                        App.set-unread-only(!App.unread-only);
+                        App.drawer-open = false;
+                    }
+                }
+                if App.accounts.length > 1: Text {
+                    x: 10px;
+                    text: @tr("Accounts");
+                    color: Theme.text-faint;
+                    font-size: Theme.font-sm;
+                    font-weight: 600;
+                    height: 34px;
+                    vertical-alignment: bottom;
+                }
+                if App.accounts.length > 1: DrawerRow {
+                    text: @tr("All accounts");
+                    dot: Theme.text-faint;
+                    active: App.account-filter == -1;
+                    clicked => {
+                        App.filter(-1);
+                        App.drawer-open = false;
+                    }
+                }
+                for a[i] in (App.accounts.length > 1 ? App.accounts : []): DrawerRow {
+                    text: a.label;
+                    detail: a.email;
+                    dot: a.hue;
+                    active: App.account-filter == i;
+                    clicked => {
+                        App.filter(i);
+                        App.drawer-open = false;
+                    }
+                }
+                Rectangle { height: 14px; }
+                Divider { }
+                DrawerRow {
+                    icon: Icons.refresh;
+                    text: @tr("Check for new mail");
+                    clicked => {
+                        App.sync-now();
+                        App.drawer-open = false;
+                    }
+                }
+                DrawerRow {
+                    icon: Icons.settings;
+                    text: @tr("Settings");
+                    clicked => {
+                        App.drawer-open = false;
+                        App.settings-open = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: App.total-unread > 0 ? "Thundergoose (" + App.total-unread + ")" : "Thundergoose";
     icon: @image-url("icons/app-icon.svg");
     preferred-width: 1280px;
     preferred-height: 820px;
-    min-width: 720px;
-    min-height: 460px;
+    min-width: 320px;
+    min-height: 400px;
+    // Below this, one pane at a time (phones, narrow windows).
+    init => { App.narrow = self.width < 700px; }
+    changed width => {
+        App.narrow = self.width < 700px;
+        if !App.narrow { App.drawer-open = false; }
+    }
     background: Theme.bg;
     default-font-family: "Inter";
     default-font-size: 12.5px;
@@ -2112,10 +2375,12 @@ export component AppWindow inherits Window {
                 App.sync-now();
                 return accept;
             }
-            if e.text == Key.Escape {
+            if e.text == Key.Escape || e.text == Key.Back {
+                if App.drawer-open { App.drawer-open = false; return accept; }
                 if App.settings-open { App.settings-open = false; return accept; }
                 if App.people-open { App.people-open = false; return accept; }
                 if App.new-chat { App.cancel-new-chat(); return accept; }
+                if App.narrow && App.has-chat { App.go-back(); return accept; }
             }
             if e.modifiers.alt && e.text == Key.DownArrow {
                 App.select-peer(min(App.peers.length - 1, App.selected + 1));
@@ -2128,13 +2393,20 @@ export component AppWindow inherits Window {
             reject
         }
         HorizontalLayout {
+            // Narrow: the list or the conversation, never both.
+            property <bool> show-list: !App.has-chat && !App.new-chat;
             sidebar := Sidebar {
-                width: max(260px, min(App.sidebar-width, 600px));
-                horizontal-stretch: 0;
+                property <length> wide-width: max(260px, min(App.sidebar-width, 600px));
+                min-width: App.narrow ? 0px : self.wide-width;
+                preferred-width: self.wide-width;
+                max-width: App.narrow ? (parent.show-list ? 100000px : 0px) : self.wide-width;
+                visible: !App.narrow || parent.show-list;
+                horizontal-stretch: App.narrow && parent.show-list ? 1 : 0;
             }
             // Drag to resize the sidebar.
             Rectangle {
-                width: 5px;
+                width: App.narrow ? 0px : 5px;
+                visible: !App.narrow;
                 background: handle.has-hover || handle.pressed ? Theme.accent.with-alpha(0.35) : transparent;
                 animate background { duration: 120ms; }
                 Rectangle {
@@ -2158,6 +2430,10 @@ export component AppWindow inherits Window {
             }
             Rectangle {
                 horizontal-stretch: 1;
+                visible: !App.narrow || !parent.show-list;
+                // Its content would otherwise keep its minimum width even while hidden.
+                min-width: 0px;
+                max-width: App.narrow && parent.show-list ? 0px : 100000px;
                 EmptyState {
                     visible: !App.has-chat && !App.new-chat;
                 }
@@ -2168,6 +2444,7 @@ export component AppWindow inherits Window {
         }
     }
 
+    if App.narrow: Drawer { }
     if App.settings-open: SettingsDialog { }
 
     if App.toast != "": Rectangle {

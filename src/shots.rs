@@ -13,6 +13,8 @@ use crate::{App, AppWindow};
 const WIDTH: u32 = 1280;
 const HEIGHT: u32 = 800;
 const SCALE: f32 = 2.0;
+/// The phone pictures: a typical phone in logical pixels, and its pixel density.
+const PHONE: (u32, u32, f32) = (400, 860, 2.5);
 
 struct Headless {
     window: Rc<MinimalSoftwareWindow>,
@@ -40,7 +42,8 @@ fn settle() {
 }
 
 fn save(window: &MinimalSoftwareWindow, path: &Path) {
-    let (w, h) = ((WIDTH as f32 * SCALE) as u32, (HEIGHT as f32 * SCALE) as u32);
+    let size = window.size();
+    let (w, h) = (size.width, size.height);
     let mut buf = vec![Rgb8Pixel { r: 0, g: 0, b: 0 }; (w * h) as usize];
     window.request_redraw();
     window.draw_if_needed(|r| {
@@ -180,6 +183,29 @@ pub fn take(out: &Path) -> Result<(), PlatformError> {
             std::thread::sleep(Duration::from_millis(15));
         }
         save(&window, &out.join("picker.png"));
+    }
+
+    // The narrow, phone layout: list, drawer, conversation.
+    {
+        ui.global::<App>().set_settings_open(false);
+        let (w, h, scale) = PHONE;
+        window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: scale });
+        window.set_size(PhysicalSize::new((w as f32 * scale) as u32, (h as f32 * scale) as u32));
+        look(2, 0);
+        crate::app::with_core(|c| c.set_tab(0));
+        ui.global::<App>().invoke_go_back();
+        settle();
+        save(&window, &out.join("phone-list.png"));
+        ui.global::<App>().set_drawer_open(true);
+        settle();
+        save(&window, &out.join("phone-drawer.png"));
+        ui.global::<App>().set_drawer_open(false);
+        open("maya@chen.example");
+        settle();
+        save(&window, &out.join("phone-chat.png"));
+        open("orders@trailhead-outfitters.example");
+        settle();
+        save(&window, &out.join("phone-html.png"));
     }
 
     // First start on a computer with Thunderbird (not used in the README).

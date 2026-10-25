@@ -35,7 +35,7 @@ jobs:
           cargo install cargo-deb --locked
           mkdir -p dist
           cargo deb --no-build --output dist/
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="thundergoose") | .version')
           mv dist/*.deb "dist/Thundergoose-${version}-ubuntu-amd64.deb"
       - uses: actions/upload-artifact@v4
         with:
@@ -58,7 +58,7 @@ jobs:
           cargo install cargo-generate-rpm --locked
           mkdir -p dist
           cargo generate-rpm --output dist/
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="thundergoose") | .version')
           mv dist/*.rpm "dist/Thundergoose-${version}-fedora-x86_64.rpm"
       - uses: actions/upload-artifact@v4
         with:
@@ -77,7 +77,7 @@ jobs:
       - name: Installer
         shell: pwsh
         run: |
-          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $version = ((cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object { $_.name -eq 'thundergoose' }).version
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
             $inno = "${env:ProgramFiles(x86)}\Inno Setup 6"
             if (-not (Test-Path "$inno\ISCC.exe")) { choco install innosetup -y --no-progress }
@@ -107,7 +107,7 @@ jobs:
           cargo build --release --locked --target x86_64-apple-darwin
       - name: App bundle and disk image
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="thundergoose") | .version')
           app=dist/Thundergoose.app
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
           lipo -create -output "$app/Contents/MacOS/thundergoose" \
@@ -131,10 +131,61 @@ jobs:
           name: macos
           path: dist/*.dmg
 
+  android:
+    name: Android (.apk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          # A stable key (repository secrets) lets new versions install over old ones; without
+          # one, a throwaway key is made and each build has to be installed fresh.
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          else
+            keytool -genkeypair -keystore "$RUNNER_TEMP/release.keystore" -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Thundergoose" -noprompt
+            echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android" >> "$GITHUB_ENV"
+          fi
+          echo "CARGO_APK_RELEASE_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+      - name: Build
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_NDK_LATEST_HOME"
+          cargo install cargo-apk --locked
+          set -o pipefail
+          cargo apk build --release -p thundergoose-android 2>&1 | tee build.log
+      - name: Report build errors
+        if: failure()
+        run: |
+          # Annotations can be read without signing in, unlike the logs.
+          grep -E "^(error|warning: unused)|error:|panicked" build.log | head -40 | sed ':a;N;$!ba;s/\n/%0A/g' | sed 's/^/::error title=Android build::/' || true
+          tail -c 6000 build.log | sed ':a;N;$!ba;s/\n/%0A/g' | sed 's/^/::error title=Android build (end of log)::/'
+      - name: Collect
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="thundergoose") | .version')
+          mkdir -p dist
+          cp target/release/apk/Thundergoose.apk "dist/Thundergoose-${version}-android-arm64.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*.apk
+
   release:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [ubuntu, fedora, windows, macos]
+    needs: [ubuntu, fedora, windows, macos, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

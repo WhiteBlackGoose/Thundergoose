@@ -211,7 +211,7 @@ pub fn interactive_login(issuer: Issuer, login_hint: &str) -> Result<Tokens, OAu
     }
     serve(listener, tx);
 
-    open::that(&url).map_err(|e| err(false, format!("cannot open browser: {e}")))?;
+    crate::platform::open(&url).map_err(|e| err(false, format!("cannot open browser: {e}")))?;
     let (code, got_state) = match rx.recv_timeout(Duration::from_secs(300)) {
         Ok(Some(v)) => v,
         Ok(None) => return Err(err(true, "sign-in was cancelled or denied")),

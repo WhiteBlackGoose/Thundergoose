@@ -35,13 +35,15 @@ const PREVIEW_PX: u32 = 1200;
 
 type PreviewKey = (i64, usize);
 /// A rendering of an HTML mail: mail id, full (with quotes, uncut), remote images loaded.
-type HtmlKey = (i64, bool, bool);
+/// … and the width it was laid out at, in CSS pixels.
+type HtmlKey = (i64, bool, bool, u16);
 /// Renderings kept in memory.
 const HTML_CACHE: usize = 40;
 
 struct HtmlView {
     image: slint::Image,
     links: Vec<crate::html::Link>,
+    css_width: f32,
     css_height: f32,
     blocked: bool,
     quoted: bool,
@@ -90,12 +92,12 @@ fn spawn_html_renderer(db: PathBuf, jobs: HtmlJobs) -> Sender<HtmlCmd> {
                 for (i, cmd) in cmds.into_iter().enumerate() {
                     match cmd {
                         HtmlCmd::Render(key, scale) => {
-                            let (id, full, remote) = key;
+                            let (id, full, remote, width) = key;
                             // Blitz is young; a mail that trips it shows as text instead of taking the app down.
                             let loaded = store.raw(id).and_then(|raw| {
                                 let html = crate::parse::html(&raw)?;
                                 let inline = crate::parse::inline_parts(&raw);
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::html::Page::load(&html, inline, remote, scale, full))).ok()
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::html::Page::load(&html, inline, remote, scale, full, width as f32))).ok()
                             });
                             match loaded {
                                 Some((page, rendered)) => {
@@ -860,6 +862,14 @@ impl Core {
         let me = self.me.read().unwrap().clone();
         let mut want_previews: Vec<PreviewKey> = Vec::new();
         let mut want_html: Vec<HtmlKey> = Vec::new();
+        // On a phone, HTML is laid out at the bubble's width (templates have mobile styles for
+        // that); otherwise at the 600-odd pixels they are designed for.
+        let html_width: u16 = if app.get_narrow() {
+            let w = ui.window().size().width as f32 / ui.window().scale_factor();
+            ((w - 16.0) * 0.9 - 26.0).clamp(crate::html::MIN_CSS_WIDTH, crate::html::CSS_WIDTH) as u16 / 10 * 10
+        } else {
+            crate::html::CSS_WIDTH as u16
+        };
         let mut shown_html: HashMap<i64, HtmlKey> = HashMap::new();
         let mut items = Vec::with_capacity(self.mails.len());
         let mut prev: Option<&MailRow> = None;
@@ -873,7 +883,7 @@ impl Core {
             let expanded = self.expanded.contains(&m.id);
             let formatted = m.has_html && m.has_body && self.format_override.get(&m.id).copied().unwrap_or(m.rich);
             let remote = self.remote_once.contains(&m.id) || self.remote_senders.contains(&m.from.addr);
-            let html_key = (m.id, expanded, remote);
+            let html_key = (m.id, expanded, remote, html_width);
             let html = if formatted {
                 match self.html_cache.get(&html_key) {
                     Some(v) => v.as_ref(),
@@ -942,6 +952,7 @@ impl Core {
                 html: html.map(|v| v.image.clone()).unwrap_or_default(),
                 html_on: html.is_some(),
                 html_height: html.map(|v| v.css_height).unwrap_or(0.0),
+                html_width: html.map(|v| v.css_width).unwrap_or(crate::html::CSS_WIDTH),
                 html_blocked: html.is_some_and(|v| v.blocked) && !remote,
                 html_formatted: formatted,
                 expanded,
@@ -1020,7 +1031,7 @@ impl Core {
             match d {
                 HtmlDone::Rendered(k, Some(r)) => {
                     self.html_inflight = self.html_inflight.saturating_sub(1);
-                    let view = HtmlView { image: slint::Image::from_rgba8(r.pixels), links: r.links, css_height: r.css_height, blocked: r.blocked, quoted: r.quoted, cut: r.cut };
+                    let view = HtmlView { image: slint::Image::from_rgba8(r.pixels), links: r.links, css_width: r.css_width, css_height: r.css_height, blocked: r.blocked, quoted: r.quoted, cut: r.cut };
                     self.html_cache.insert(k, Some(view));
                 }
                 HtmlDone::Rendered(k, None) => {
@@ -1970,7 +1981,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
                 Some((sel, t)) if *sel == id as i64 => t.clone(),
                 _ => c.find_mail(id).map(|m| m.text.clone()).unwrap_or_default(),
             };
-            match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text)) {
+            match crate::platform::copy(&text) {
                 Ok(()) => c.toast("Copied", false),
                 Err(e) => c.toast(format!("Clipboard unavailable: {e}"), true),
             }
@@ -1987,7 +1998,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
                 let addr = addr.split('?').next().unwrap_or(addr).to_string();
                 let key = c.key_for(&[addr]);
                 c.open_peer(key);
-            } else if let Err(e) = open::that_detached(url.as_str()) {
+            } else if let Err(e) = crate::platform::open(url.as_str()) {
                 c.toast(format!("Cannot open link: {e}"), true);
             }
         })
@@ -2025,7 +2036,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
             let csp = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data: cid:; style-src 'unsafe-inline'; font-src data:\"><meta charset=\"utf-8\">";
             let path = std::env::temp_dir().join(format!("thundergoose-{id}.html"));
             if std::fs::write(&path, format!("{csp}{html}")).is_ok() {
-                let _ = open::that_detached(&path);
+                let _ = crate::platform::open_file(&path);
             }
         })
     });
@@ -2040,7 +2051,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
             let path = dir.join(safe);
             match std::fs::write(&path, bytes) {
                 Ok(()) => {
-                    let _ = open::that_detached(&path);
+                    let _ = crate::platform::open_file(&path);
                 }
                 Err(e) => c.toast(format!("Cannot open attachment: {e}"), true),
             }
@@ -2051,7 +2062,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
             let Some(m) = c.find_mail(id) else { return };
             let Some(att) = m.attachments.iter().find(|a| a.index as i32 == index).cloned() else { return };
             let Some(bytes) = c.store.raw(id as i64).and_then(|r| crate::parse::attachment_bytes(&r, att.index)) else { return };
-            if let Some(path) = rfd::FileDialog::new().set_file_name(&att.name).save_file() {
+            if let Some(path) = crate::platform::save_as(&att.name) {
                 match std::fs::write(&path, bytes) {
                     Ok(()) => c.toast(format!("Saved {}", path.display()), false),
                     Err(e) => c.toast(format!("Cannot save: {e}"), true),
@@ -2060,7 +2071,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         })
     });
     app.on_copy(|text| {
-        with_core(|c| match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text.to_string())) {
+        with_core(|c| match crate::platform::copy(&text) {
             Ok(()) => c.toast("Copied", false),
             Err(e) => c.toast(format!("Clipboard unavailable: {e}"), true),
         })
@@ -2089,7 +2100,11 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
     });
     app.on_attach(|| {
         with_core(|c| {
-            if let Some(files) = rfd::FileDialog::new().pick_files() {
+            if !crate::platform::FILE_DIALOGS {
+                c.toast("Attaching files isn't available on Android yet", true);
+                return;
+            }
+            if let Some(files) = crate::platform::pick_files() {
                 c.attachments.extend(files);
                 c.update_composer();
             }
@@ -2146,6 +2161,21 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         })
     });
     app.on_new_chat_confirm(|| with_core(|c| c.confirm_new_chat()));
+    app.on_go_back(|| {
+        with_core(|c| {
+            c.save_draft();
+            c.selected = None;
+            c.mails.clear();
+            c.messages.set_vec(Vec::new());
+            c.close_suggestions();
+            let ui = c.ui();
+            let app = ui.global::<App>();
+            app.set_has_chat(false);
+            app.set_new_chat(false);
+            app.set_people_open(false);
+            c.refresh_peers();
+        })
+    });
     app.on_cancel_new_chat(|| {
         with_core(|c| {
             let ui = c.ui();
