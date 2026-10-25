@@ -75,6 +75,9 @@ export struct MessageItem {
     account-color: color,
     /// Only in a Junk folder.
     junk: bool,
+    /// 0 nothing to say, 1 sending, 2 sent just now, 3 not sent (see `send-error`).
+    send-state: int,
+    send-error: string,
     loading: bool,
     has-html: bool,
     /// The HTML version, rendered; shown instead of the text when `html-on`.
@@ -108,6 +111,14 @@ export struct AccountItem {
     default-tag: string,
     /// Index into `App.tag-colors`, or -1 for the automatic color.
     tag-color: int,
+}
+
+/// A past contact offered while typing an address.
+export struct Suggestion {
+    name: string,
+    addr: string,
+    initials: string,
+    hue: color,
 }
 
 export struct Participant {
@@ -157,6 +168,17 @@ export global App {
     // Composer
     in-out property <string> draft-text;
     in-out property <string> draft-subject;
+    in-out property <string> draft-cc;
+    in-out property <string> draft-bcc;
+    in-out property <bool> cc-open;
+    // Address suggestions: for which field (0 To, 1 Cc, 2 Bcc, -1 none), where it is on screen.
+    in property <[Suggestion]> suggestions;
+    in property <int> suggest-field: -1;
+    in-out property <int> suggest-index;
+    in-out property <length> suggest-x;
+    in-out property <length> suggest-y;
+    in-out property <length> suggest-w;
+    in-out property <length> suggest-h;
     in property <string> draft-from;
     in property <bool> draft-from-choosable;
     /// In the "Yourself" conversation: which own address the mail goes to.
@@ -237,6 +259,12 @@ export global App {
     callback save-attachment(int, int);
     callback copy(string);
     callback send();
+    callback address-edited(int, string);
+    callback accept-suggestion(int, int);
+    callback close-suggestions();
+    callback retry-send(int);
+    /// Give up on a message that wasn't sent; it goes back into the composer.
+    callback discard-send(int);
     callback attach();
     callback remove-attachment(int);
     callback choose-from(int);

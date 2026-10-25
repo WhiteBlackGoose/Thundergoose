@@ -12,10 +12,14 @@ use crate::config::{Account, Security};
 use crate::creds::{Creds, Login};
 use crate::store::{Header, Person};
 
+#[derive(Clone)]
 pub struct Draft {
     pub account: Account,
     pub from: Person,
     pub to: Vec<Person>,
+    pub cc: Vec<Person>,
+    /// Hidden copies: sent to, but not named in the mail.
+    pub bcc: Vec<Person>,
     pub subject: String,
     pub text: String,
     pub in_reply_to: Option<String>,
@@ -91,11 +95,31 @@ fn new_message_id(from: &str) -> String {
 }
 
 /// Sends the draft. Returns the raw message and its header for the local store.
+/// Builds and sends the mail; returns it as sent, for the local store.
 pub fn send(d: &Draft, creds: &Creds) -> Result<(Vec<u8>, Header), String> {
+    let (msg, raw, header) = build(d)?;
+    let transport = transport(&d.account, creds)?;
+    transport.send(&msg).map_err(|e| {
+        if e.is_permanent() {
+            creds.invalidate(&d.account);
+        }
+        format!("{}: {e}", d.account.smtp.host)
+    })?;
+    Ok((raw, header))
+}
+
+/// The mail a draft becomes, without sending it.
+pub fn build(d: &Draft) -> Result<(Message, Vec<u8>, Header), String> {
     let msgid = new_message_id(&d.from.addr);
     let mut b = Message::builder().from(mailbox(&d.from)?).subject(d.subject.clone()).message_id(Some(format!("<{msgid}>"))).user_agent("Thundergoose".into());
     for p in &d.to {
         b = b.to(mailbox(p)?);
+    }
+    for p in &d.cc {
+        b = b.cc(mailbox(p)?);
+    }
+    for p in &d.bcc {
+        b = b.bcc(mailbox(p)?);
     }
     if let Some(irt) = &d.in_reply_to {
         b = b.in_reply_to(format!("<{irt}>"));
@@ -116,26 +140,17 @@ pub fn send(d: &Draft, creds: &Creds) -> Result<(Vec<u8>, Header), String> {
         b.multipart(mp)
     }
     .map_err(|e| format!("cannot build message: {e}"))?;
-
-    let transport = transport(&d.account, creds)?;
-    transport.send(&msg).map_err(|e| {
-        if e.is_permanent() {
-            creds.invalidate(&d.account);
-        }
-        format!("{}: {e}", d.account.smtp.host)
-    })?;
-
     let raw = msg.formatted();
     let header = Header {
         msgid,
         date: chrono::Utc::now().timestamp(),
         from: d.from.clone(),
         to: d.to.clone(),
-        cc: Vec::new(),
+        cc: d.cc.clone(),
         subject: d.subject.clone(),
         in_reply_to: d.in_reply_to.clone().unwrap_or_default(),
         size: raw.len() as u32,
         seen: true,
     };
-    Ok((raw, header))
+    Ok((msg, raw, header))
 }

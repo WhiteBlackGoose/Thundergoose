@@ -106,6 +106,43 @@ pub fn take(out: &Path) -> Result<(), PlatformError> {
     settle();
     save(&window, &out.join("settings-light.png"));
 
+    // Sending, and suggestions while typing an address (not used in the README).
+    if std::env::var_os("THUNDERGOOSE_SHOT_SEND").is_some() {
+        ui.global::<App>().set_settings_open(false);
+        look(2, 0);
+        open("maya@chen.example");
+        settle();
+        ui.global::<App>().set_draft_text("Sounds great, see you Saturday!\n\nSam".into());
+        ui.global::<App>().invoke_send();
+        for _ in 0..20 {
+            slint::platform::update_timers_and_animations();
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        save(&window, &out.join("sending.png"));
+        settle();
+        std::thread::sleep(Duration::from_millis(1800));
+        settle();
+        save(&window, &out.join("sent.png"));
+        ui.global::<App>().invoke_start_new_chat();
+        settle();
+        for ch in ["p", "r"] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: ch.into() });
+            window.dispatch_event(WindowEvent::KeyReleased { text: ch.into() });
+            slint::platform::update_timers_and_animations();
+        }
+        settle();
+        save(&window, &out.join("suggest.png"));
+    }
+
+    // Any conversation, by key (not used in the README).
+    if let Ok(key) = std::env::var("THUNDERGOOSE_SHOT_OPEN") {
+        ui.global::<App>().set_settings_open(false);
+        look(2, 0);
+        open(&key);
+        settle();
+        save(&window, &out.join("open.png"));
+    }
+
     // Selecting text in a rendered HTML mail (not used in the README).
     if std::env::var_os("THUNDERGOOSE_SHOT_SELECT").is_some() {
         use slint::platform::PointerEventButton;

@@ -18,7 +18,7 @@ use crate::config::{Issuer, Security, Server};
 use crate::favicon::Favicons;
 use crate::store::{Flag, Flags, MailRow, PeerRow, Person, Placement, Store};
 use crate::sync::{self, Cmd, Shared};
-use crate::{AccountItem, AccountTag, App, AppWindow, AttachmentItem, MessageItem, Palette, Participant, PeerItem, Theme};
+use crate::{Suggestion, AccountItem, AccountTag, App, AppWindow, AttachmentItem, MessageItem, Palette, Participant, PeerItem, Theme};
 
 const PAGE: usize = 60;
 /// Interface sizes offered in Settings.
@@ -188,6 +188,35 @@ const HUES: [(u8, u8, u8); 10] = [
     (0xdb, 0x27, 0x77),
 ];
 
+/// How well `query` matches a contact, or None. Prefix matches beat word starts beat
+/// substrings beat letters in order ("mch" finds Maya Chen); people you mail often and recently
+/// come first among equals.
+fn contact_score(query: &str, addr: &str, name: &str, count: i64, last: i64, now: i64) -> Option<f64> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return None;
+    }
+    let name = name.to_lowercase();
+    let words = |s: &str| s.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_string).collect::<Vec<_>>();
+    let subsequence = |hay: &str| {
+        let mut it = hay.chars();
+        q.chars().all(|c| it.any(|h| h == c))
+    };
+    let base = if addr.starts_with(&q) || name.starts_with(&q) {
+        1000.0
+    } else if words(&name).iter().chain(words(addr).iter()).any(|w| w.starts_with(&q)) {
+        800.0
+    } else if addr.contains(&q) || name.contains(&q) {
+        500.0
+    } else if q.chars().count() >= 2 && (subsequence(&name) || subsequence(addr)) {
+        200.0
+    } else {
+        return None;
+    };
+    let days = ((now - last).max(0) as f64) / 86400.0;
+    Some(base + (count as f64).ln_1p() * 25.0 + 60.0 / (1.0 + days / 30.0))
+}
+
 /// Sidebar tab of a conversation: 0 Chats, 1 Muted, 2 Ignored, 3 Spam. `junk`: all its mail is
 /// in Junk folders. Your own choices win over the server's spam filter.
 fn tab_for(f: Flags, junk: bool) -> i32 {
@@ -301,6 +330,18 @@ fn split_addresses(s: &str) -> Vec<String> {
         .collect()
 }
 
+/// A message on its way out, shown in the conversation until the server has it.
+struct PendingSend {
+    /// Negative, so it never collides with stored mail.
+    id: i64,
+    /// The conversation it was written in, and the one it will belong to (with Cc).
+    key: String,
+    peer: String,
+    draft: crate::send::Draft,
+    error: Option<String>,
+    started: i64,
+}
+
 struct Draft {
     text: String,
     subject: String,
@@ -340,7 +381,16 @@ pub struct Core {
     drafts: HashMap<String, Draft>,
     attachments: Vec<PathBuf>,
     default_subject: String,
-    sending: bool,
+    pending: Vec<PendingSend>,
+    sent_jobs: Arc<Mutex<Vec<(i64, Result<String, String>)>>>,
+    /// Everyone you've exchanged mail with, for address suggestions: (address, name, mails, newest).
+    book: Vec<(String, String, i64, i64)>,
+    junk_senders: HashSet<String>,
+    /// The suggestions on screen.
+    suggestions: Vec<String>,
+    next_pending: i64,
+    /// Message-IDs sent in this session, marked "Sent" in the conversation.
+    just_sent: HashSet<String>,
     last_peer_refresh: Instant,
     toast_until: Option<Instant>,
     favicons: Arc<Favicons>,
@@ -439,6 +489,8 @@ impl Core {
 
     fn refresh_names(&mut self) {
         self.names = self.store.names();
+        self.book = self.store.address_book();
+        self.junk_senders = self.store.junk_senders();
     }
 
     fn account_index_for(&self, addr: &str) -> Option<usize> {
@@ -908,6 +960,8 @@ impl Core {
                     self.addr_color(&m.me_addr)
                 },
                 junk: m.junk,
+                send_state: if m.outgoing && self.just_sent.contains(&m.msgid) { 2 } else { 0 },
+                send_error: SharedString::new(),
                 loading: !m.has_body,
                 has_html: m.has_html,
                 unread: !m.seen,
@@ -917,6 +971,7 @@ impl Core {
             });
             prev = Some(m);
         }
+        items.extend(self.pending_items(&key));
         // Update in place when the list is the same, so the view doesn't jump.
         let same = self.messages.row_count() == items.len() && items.iter().enumerate().all(|(i, it)| self.messages.row_data(i).is_some_and(|r| r.id == it.id));
         if same {
@@ -991,6 +1046,68 @@ impl Core {
         }
     }
 
+    /// Suggests addresses for the word being typed in field 0 (To), 1 (Cc) or 2 (Bcc).
+    /// Nobody you ignored or marked as spam, nobody only ever seen in Junk, none of your own.
+    fn suggest(&mut self, field: i32, text: &str) {
+        let token = text.rsplit([',', ';']).next().unwrap_or("").trim();
+        let typed: HashSet<String> = split_addresses(text).into_iter().collect();
+        let me = self.me.read().unwrap().clone();
+        let now = chrono::Utc::now().timestamp();
+        let mut found: Vec<(f64, usize)> = self
+            .book
+            .iter()
+            .enumerate()
+            .filter(|(_, (addr, ..))| {
+                let f = self.flags.get(addr).copied().unwrap_or_default();
+                !me.contains(addr) && !typed.contains(addr) && !f.ignored && f.spam != 1 && !self.junk_senders.contains(addr)
+            })
+            .filter_map(|(i, (addr, name, count, last))| contact_score(token, addr, name, *count, *last, now).map(|s| (s, i)))
+            .collect();
+        found.sort_by(|a, b| b.0.total_cmp(&a.0));
+        found.truncate(7);
+        let items: Vec<Suggestion> = found.iter().map(|(_, i)| {
+            let (addr, name, ..) = &self.book[*i];
+            Suggestion { name: name.as_str().into(), addr: addr.as_str().into(), initials: initials(if name.is_empty() { addr } else { name }).into(), hue: hue(addr) }
+        }).collect();
+        self.suggestions = found.iter().map(|(_, i)| self.book[*i].0.clone()).collect();
+        let ui = self.ui();
+        let app = ui.global::<App>();
+        app.set_suggest_field(if items.is_empty() { -1 } else { field });
+        app.set_suggest_index(0);
+        app.set_suggestions(ModelRc::new(VecModel::from(items)));
+    }
+
+    fn close_suggestions(&mut self) {
+        self.suggestions.clear();
+        let ui = self.ui();
+        let app = ui.global::<App>();
+        app.set_suggest_field(-1);
+        app.set_suggestions(ModelRc::default());
+    }
+
+    /// Puts the chosen address in place of the word being typed.
+    fn accept_suggestion(&mut self, field: i32, index: i32) {
+        let Some(addr) = self.suggestions.get(index.max(0) as usize).cloned() else { return };
+        let ui = self.ui();
+        let app = ui.global::<App>();
+        let text = match field {
+            1 => app.get_draft_cc(),
+            2 => app.get_draft_bcc(),
+            _ => app.get_new_chat_to(),
+        };
+        let kept = match text.rfind([',', ';']) {
+            Some(i) => format!("{} ", text[..=i].trim_end()),
+            None => String::new(),
+        };
+        let new: SharedString = format!("{kept}{addr}, ").into();
+        match field {
+            1 => app.set_draft_cc(new),
+            2 => app.set_draft_bcc(new),
+            _ => app.set_new_chat_to(new),
+        }
+        self.close_suggestions();
+    }
+
     fn link_at(&self, id: i64, x: f32, y: f32) -> String {
         let Some(v) = self.html_shown.get(&id).and_then(|k| self.html_cache.get(k)).and_then(|v| v.as_ref()) else { return String::new() };
         v.links.iter().find(|l| x >= l.rect.0 && x < l.rect.0 + l.rect.2 && y >= l.rect.1 && y < l.rect.1 + l.rect.3).map(|l| l.url.clone()).unwrap_or_default()
@@ -1054,9 +1171,6 @@ impl Core {
     // -------------------------------------------------------------- sending
 
     fn send(&mut self) {
-        if self.sending {
-            return;
-        }
         let ui = self.ui();
         let app = ui.global::<App>();
         if app.get_new_chat() {
@@ -1074,17 +1188,17 @@ impl Core {
             self.toast("No account to send from", true);
             return;
         };
+        let person = |a: &str| Person { name: self.name_of(a).cloned().unwrap_or_default(), addr: a.to_string() };
         let to: Vec<Person> = if key.is_empty() {
             let addr = if self.self_to.is_empty() { self.from_addr.clone() } else { self.self_to.clone() };
             let name = self.account_index_for(&addr).and_then(|i| self.accounts.get(i)).map(|a| a.name.clone()).unwrap_or_default();
             vec![Person { name, addr }]
         } else {
-            key.split(',').map(|a| Person { name: self.name_of(a).cloned().unwrap_or_default(), addr: a.to_string() }).collect()
+            key.split(',').map(person).collect()
         };
-        if self.demo {
-            self.toast("Demo mode: nothing is sent", false);
-            return;
-        }
+        let in_to = |a: &String| to.iter().any(|p| p.addr.eq_ignore_ascii_case(a));
+        let cc: Vec<Person> = split_addresses(&app.get_draft_cc()).into_iter().filter(|a| !in_to(a)).map(|a| person(&a)).collect();
+        let bcc: Vec<Person> = split_addresses(&app.get_draft_bcc()).into_iter().map(|a| person(&a)).collect();
         let subject = app.get_draft_subject().to_string();
         let last = self.reply_target();
         let threaded = last.is_some() && subject == self.default_subject;
@@ -1099,26 +1213,53 @@ impl Core {
             }
             None => (None, Vec::new()),
         };
+        // Cc'd people take part in the conversation; Bcc'd ones only get a copy.
+        let mut all: Vec<String> = to.iter().chain(&cc).map(|p| p.addr.clone()).collect();
+        all.sort();
+        let peer = if key.is_empty() { key.clone() } else { self.key_for(&all) };
         let draft = crate::send::Draft {
             from: Person { name: account.name.clone(), addr: self.from_addr.clone() },
             account,
             to,
+            cc,
+            bcc,
             subject,
             text,
             in_reply_to,
             references,
-            attachments: self.attachments.clone(),
+            attachments: std::mem::take(&mut self.attachments),
         };
-        self.sending = true;
-        app.set_sending(true);
-        let creds = self.creds.clone();
-        let db = self.paths.db();
+        // The composer is free again right away; the message waits in its own bubble.
+        app.set_draft_text(SharedString::new());
+        app.set_draft_cc(SharedString::new());
+        app.set_draft_bcc(SharedString::new());
+        app.set_cc_open(false);
+        self.update_composer();
+        self.next_pending -= 1;
+        let id = self.next_pending;
+        self.pending.push(PendingSend { id, key: key.clone(), peer, draft, error: None, started: chrono::Utc::now().timestamp() });
+        self.load_conversation(true);
+        self.start_send(id);
+    }
+
+    /// Sends (or re-sends) a waiting message in the background.
+    fn start_send(&mut self, id: i64) {
+        let Some(p) = self.pending.iter_mut().find(|p| p.id == id) else { return };
+        p.error = None;
+        let (draft, peer) = (p.draft.clone(), p.peer.clone());
+        let (creds, db, shared, demo, sent_jobs) = (self.creds.clone(), self.paths.db(), self.shared.clone(), self.demo, self.sent_jobs.clone());
         let worker = self.workers.get(&draft.account.id).cloned();
-        let shared = self.shared.clone();
         std::thread::spawn(move || {
-            let result = crate::send::send(&draft, &creds).and_then(|(raw, header)| {
+            let sent = if demo {
+                // Nothing leaves the computer in the demo; it only takes a moment.
+                std::thread::sleep(Duration::from_millis(1500));
+                crate::send::build(&draft).map(|(_, raw, header)| (raw, header))
+            } else {
+                crate::send::send(&draft, &creds)
+            };
+            let result = sent.and_then(|(raw, header)| {
                 let store = Store::open(&db).map_err(|e| e.to_string())?;
-                let placement = Placement { peer: key.clone(), outgoing: true, me_addr: draft.from.addr.to_lowercase() };
+                let placement = Placement { peer, outgoing: true, me_addr: draft.from.addr.to_lowercase() };
                 let body = crate::parse::body(&raw);
                 store.add_sent(&draft.account.id, &header, &placement, &raw, &body).map_err(|e| e.to_string())?;
                 if draft.account.save_sent {
@@ -1127,31 +1268,73 @@ impl Core {
                     }
                 }
                 shared.dirty.store(true, Ordering::Relaxed);
-                Ok(())
+                Ok(header.msgid)
             });
-            on_ui(move |core| {
-                core.sending = false;
-                let ui = core.ui();
-        let app = ui.global::<App>();
-                app.set_sending(false);
-                match result {
-                    Ok(()) => {
-                        if core.selected.as_deref() == Some(key.as_str()) {
-                            app.set_draft_text(SharedString::new());
-                            core.attachments.clear();
-                            core.update_composer();
-                            core.load_conversation(true);
-                            core.default_subject = core.reply_target().map(|m| reply_subject(&m.subject)).unwrap_or_default();
-                            app.set_draft_subject(core.default_subject.as_str().into());
-                        } else {
-                            core.drafts.remove(&key);
-                        }
-                        core.refresh_peers();
-                    }
-                    Err(e) => core.toast(format!("Not sent: {e}"), true),
-                }
-            });
+            sent_jobs.lock().unwrap().push((id, result));
+            on_ui(|core| core.sends_finished());
         });
+        self.load_conversation(false);
+    }
+
+    /// Takes in sends that finished (also polled, should the nudge not arrive).
+    fn sends_finished(&mut self) {
+        let done: Vec<(i64, Result<String, String>)> = std::mem::take(&mut *self.sent_jobs.lock().unwrap());
+        if done.is_empty() {
+            return;
+        }
+        for (id, result) in done {
+            match result {
+                Ok(msgid) => {
+                    self.pending.retain(|p| p.id != id);
+                    self.just_sent.insert(msgid);
+                }
+                Err(e) => {
+                    if let Some(p) = self.pending.iter_mut().find(|p| p.id == id) {
+                        p.error = Some(e);
+                    }
+                }
+            }
+        }
+        self.load_conversation(false);
+        self.refresh_peers();
+    }
+
+    /// Bubbles for messages still on their way (or failed) in the open conversation.
+    fn pending_items(&self, key: &str) -> Vec<MessageItem> {
+        self.pending
+            .iter()
+            .filter(|p| p.key == key)
+            .map(|p| {
+                let atts: Vec<AttachmentItem> = p.draft.attachments.iter().enumerate().map(|(i, a)| AttachmentItem {
+                    name: a.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default().into(),
+                    size: std::fs::metadata(a).map(|m| human_size(m.len() as usize)).unwrap_or_default().into(),
+                    index: i as i32,
+                    ..Default::default()
+                }).collect();
+                let mut via = format!("from {}", p.draft.from.addr);
+                if !p.draft.cc.is_empty() {
+                    via.push_str(&format!(" · cc {}", p.draft.cc.iter().map(|c| c.addr.as_str()).collect::<Vec<_>>().join(", ")));
+                }
+                if !p.draft.bcc.is_empty() {
+                    via.push_str(&format!(" · bcc {}", p.draft.bcc.len()));
+                }
+                MessageItem {
+                    id: p.id as i32,
+                    outgoing: true,
+                    sender: p.draft.from.name.as_str().into(),
+                    subject: p.draft.subject.as_str().into(),
+                    text: p.draft.text.as_str().into(),
+                    time: Local.timestamp_opt(p.started, 0).single().map(|t| t.format("%H:%M").to_string()).unwrap_or_default().into(),
+                    via: via.into(),
+                    via_color: self.addr_color(&p.draft.from.addr),
+                    account_color: if self.tags_shown() { self.addr_color(&p.draft.from.addr) } else { slint::Color::from_argb_u8(0, 0, 0, 0) },
+                    attachments: ModelRc::new(VecModel::from(atts)),
+                    send_state: if p.error.is_some() { 3 } else { 1 },
+                    send_error: p.error.clone().unwrap_or_default().into(),
+                    ..Default::default()
+                }
+            })
+            .collect()
     }
 
     fn confirm_new_chat(&mut self) {
@@ -1474,6 +1657,7 @@ impl Core {
 
     fn tick(&mut self) {
         self.apply_scale();
+        self.sends_finished();
         self.notify_fresh();
         if self.favicons.updated.swap(false, Ordering::Relaxed) {
             self.icons.retain(|_, v| v.is_some());
@@ -1587,6 +1771,16 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
     let flags = store.flags();
     let creds = Arc::new(Creds::new(&paths, secrets, linked.clone()));
     let shared = Arc::new(Shared::new());
+    {
+        // The address book for suggestions starts out from the mail already here.
+        let (db, shared) = (paths.db(), shared.clone());
+        std::thread::spawn(move || {
+            if let Err(e) = Store::open(&db).and_then(|s| s.backfill_addresses()) {
+                eprintln!("address book: {e}");
+            }
+            shared.dirty.store(true, Ordering::Relaxed);
+        });
+    }
     let workers: HashMap<String, Sender<Cmd>> = if demo {
         for a in &accounts {
             shared.status.lock().unwrap().push((a.id.clone(), sync::Status { online: true, ..Default::default() }));
@@ -1642,7 +1836,13 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         drafts: HashMap::new(),
         attachments: Vec::new(),
         default_subject: String::new(),
-        sending: false,
+        pending: Vec::new(),
+        sent_jobs: Arc::default(),
+        book: Vec::new(),
+        junk_senders: HashSet::new(),
+        suggestions: Vec::new(),
+        next_pending: 0,
+        just_sent: HashSet::new(),
         last_peer_refresh: Instant::now() - Duration::from_secs(10),
         toast_until: None,
         favicons,
@@ -1866,6 +2066,27 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         })
     });
     app.on_send(|| with_core(|c| c.send()));
+    app.on_address_edited(|field, text| with_core(|c| c.suggest(field, &text)));
+    app.on_accept_suggestion(|field, i| with_core(|c| c.accept_suggestion(field, i)));
+    app.on_close_suggestions(|| with_core(|c| c.close_suggestions()));
+    app.on_retry_send(|id| with_core(|c| c.start_send(id as i64)));
+    app.on_discard_send(|id| {
+        with_core(|c| {
+            // Back into the composer, so nothing written is lost.
+            if let Some(i) = c.pending.iter().position(|p| p.id == id as i64) {
+                let p = c.pending.remove(i);
+                if c.selected.as_deref() == Some(p.key.as_str()) {
+                    let ui = c.ui();
+                    let app = ui.global::<App>();
+                    app.set_draft_text(p.draft.text.into());
+                    app.set_draft_subject(p.draft.subject.into());
+                    c.attachments = p.draft.attachments;
+                    c.update_composer();
+                }
+                c.load_conversation(false);
+            }
+        })
+    });
     app.on_attach(|| {
         with_core(|c| {
             if let Some(files) = rfd::FileDialog::new().pick_files() {
@@ -2231,6 +2452,6 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
 /// Whether background work that changes the picture (icons, previews) is still going on.
 pub(crate) fn busy() -> bool {
     let mut busy = false;
-    with_core(|c| busy = c.favicons.busy() || c.previews_inflight > 0 || c.html_inflight > 0);
+    with_core(|c| busy = c.favicons.busy() || c.previews_inflight > 0 || c.html_inflight > 0 || c.pending.iter().any(|p| p.error.is_none()));
     busy
 }

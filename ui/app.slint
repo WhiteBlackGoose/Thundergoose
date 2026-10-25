@@ -4,11 +4,11 @@ import "fonts/Inter-600.ttf";
 
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
-import { App, Tip, PeerItem, MessageItem, AttachmentItem, AccountItem, Participant, AccountTag } from "state.slint";
+import { App, Tip, PeerItem, MessageItem, AttachmentItem, AccountItem, Participant, AccountTag, Suggestion } from "state.slint";
 import { IconButton, Btn, Card, Divider, VDivider, Segmented, Avatar, Field, Chip, LinkText, FieldLabel, Spinner } from "widgets.slint";
 import { ListView, ScrollView, TextEdit, Palette } from "std-widgets.slint";
 
-export { App, Tip, Theme, Palette, PeerItem, MessageItem, AttachmentItem, AccountItem, Participant, AccountTag }
+export { App, Tip, Theme, Palette, PeerItem, MessageItem, AttachmentItem, AccountItem, Participant, AccountTag, Suggestion }
 
 /// "● work": which of your addresses something belongs to.
 component AccountBadge inherits Rectangle {
@@ -704,9 +704,60 @@ component MessageRow inherits VerticalLayout {
                     save => { App.save-attachment(root.m.id, a.index); }
                   }
                 }
+                if root.m.send-state == 1: Rectangle {
+                    height: 3px;
+                    border-radius: 1.5px;
+                    clip: true;
+                    background: Theme.accent-text.with-alpha(0.18);
+                    // Indeterminate: SMTP doesn't tell how far along it is.
+                    Rectangle {
+                        width: parent.width * 0.3;
+                        x: parent.width * 1.3 * mod(animation-tick() / 1400ms, 1.0) - self.width;
+                        border-radius: 1.5px;
+                        background: Theme.accent-text.with-alpha(0.8);
+                    }
+                }
+                if root.m.send-state == 3: HorizontalLayout {
+                    spacing: 10px;
+                    Image {
+                        source: Icons.alert;
+                        width: 14px;
+                        height: 14px;
+                        y: (parent.height - self.height) / 2;
+                        colorize: Theme.danger;
+                    }
+                    Text {
+                        text: @tr("Not sent: {}", root.m.send-error);
+                        color: Theme.danger;
+                        font-size: Theme.font-sm;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                    LinkText {
+                        text: @tr("Retry");
+                        clicked => { App.retry-send(root.m.id); }
+                    }
+                    LinkText {
+                        text: @tr("Edit");
+                        clicked => { App.discard-send(root.m.id); }
+                    }
+                }
                 HorizontalLayout {
                     spacing: 12px;
                     alignment: end;
+                    if root.m.send-state == 1: Text {
+                        text: @tr("Sending…");
+                        color: Theme.text-faint;
+                        font-size: Theme.font-sm;
+                        font-italic: true;
+                    }
+                    if root.m.send-state == 2: Text {
+                        text: "✓ " + @tr("Sent");
+                        color: Theme.success;
+                        font-size: Theme.font-sm;
+                        font-weight: 600;
+                    }
                     if root.m.can-expand: LinkText {
                         text: root.m.expanded ? @tr("Show less") : @tr("Show full message");
                         clicked => { App.toggle-message(root.m.id); }
@@ -768,6 +819,100 @@ component MessageRow inherits VerticalLayout {
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// An address field that suggests past contacts as you type (Up/Down to pick, Enter to take).
+component AddressField inherits Field {
+    in property <int> field;
+    callback confirmed();
+    callback cancelled();
+    icon: Icons.at-sign;
+    property <bool> open: App.suggest-field == root.field && App.suggestions.length > 0;
+    edited(t) => {
+        App.suggest-x = root.absolute-position.x;
+        App.suggest-y = root.absolute-position.y;
+        App.suggest-w = root.width;
+        App.suggest-h = root.height;
+        App.address-edited(root.field, t);
+    }
+    key-down => {
+        if root.open {
+            App.suggest-index = min(App.suggest-index + 1, App.suggestions.length - 1);
+            return true;
+        }
+        return false;
+    }
+    key-up => {
+        if root.open {
+            App.suggest-index = max(App.suggest-index - 1, 0);
+            return true;
+        }
+        return false;
+    }
+    accepted => {
+        if root.open {
+            App.accept-suggestion(root.field, App.suggest-index);
+        } else {
+            root.confirmed();
+        }
+    }
+    escape => {
+        if root.open {
+            App.close-suggestions();
+        } else {
+            root.cancelled();
+        }
+    }
+}
+
+/// The suggestions of the address field being typed in, under it or above it.
+component SuggestionList inherits Card {
+    in property <length> origin-x;
+    in property <length> origin-y;
+    in property <length> room;
+    property <bool> above: App.suggest-y - root.origin-y > root.room / 2;
+    x: App.suggest-x - root.origin-x;
+    y: self.above ? App.suggest-y - root.origin-y - self.height - 4px : App.suggest-y - root.origin-y + App.suggest-h + 4px;
+    width: max(App.suggest-w, 320px);
+    height: rows.preferred-height + 2px;
+    rows := VerticalLayout {
+        padding: 4px;
+        spacing: 1px;
+        for s[i] in App.suggestions: Rectangle {
+            height: 42px;
+            border-radius: 7px;
+            background: i == App.suggest-index ? Theme.accent-soft : sta.has-hover ? Theme.hover : transparent;
+            sta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { App.accept-suggestion(App.suggest-field, i); }
+            }
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 10px;
+                VerticalLayout {
+                    alignment: center;
+                    Avatar { initials: s.initials; hue: s.hue; size: 28px; }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: s.name != "" ? s.name : s.addr;
+                        color: Theme.text;
+                        font-size: Theme.font;
+                        font-weight: 600;
+                        overflow: elide;
+                    }
+                    if s.name != "": Text {
+                        text: s.addr;
+                        color: Theme.text-muted;
+                        font-size: Theme.font-sm;
+                        overflow: elide;
                     }
                 }
             }
@@ -856,6 +1001,18 @@ component Composer inherits Rectangle {
                 tip: App.draft-from-choosable ? @tr("Send from another of your addresses") : "";
                 picked(i) => { App.choose-from(i); }
             }
+            LinkText {
+                y: (parent.height - self.height) / 2;
+                text: App.cc-open ? @tr("No Cc/Bcc") : @tr("Cc/Bcc");
+                subtle: !App.cc-open;
+                clicked => {
+                    App.cc-open = !App.cc-open;
+                    if !App.cc-open {
+                        App.draft-cc = "";
+                        App.draft-bcc = "";
+                    }
+                }
+            }
             if App.draft-self: AddressPicker {
                 y: (parent.height - self.height) / 2;
                 label: @tr("to ");
@@ -871,6 +1028,21 @@ component Composer inherits Rectangle {
                 placeholder: @tr("Subject");
                 clearable: false;
                 font-size: Theme.font;
+            }
+        }
+        if App.cc-open: HorizontalLayout {
+            spacing: 8px;
+            FieldLabel { text: "Cc"; vertical-alignment: center; }
+            AddressField {
+                field: 1;
+                text <=> App.draft-cc;
+                placeholder: @tr("Also to (they join the conversation)");
+            }
+            FieldLabel { text: "Bcc"; vertical-alignment: center; }
+            AddressField {
+                field: 2;
+                text <=> App.draft-bcc;
+                placeholder: @tr("Hidden copies");
             }
         }
         if App.draft-attachments.length > 0: Flickable {
@@ -1073,12 +1245,12 @@ component NewChatHeader inherits Rectangle {
         VerticalLayout {
             alignment: center;
             horizontal-stretch: 1;
-            to := Field {
+            to := AddressField {
+                field: 0;
                 text <=> App.new-chat-to;
-                placeholder: @tr("Addresses, separated by commas");
-                icon: Icons.at-sign;
-                accepted => { App.new-chat-confirm(); }
-                escape => { App.cancel-new-chat(); }
+                placeholder: @tr("Names or addresses, separated by commas");
+                confirmed => { App.new-chat-confirm(); }
+                cancelled => { App.cancel-new-chat(); }
             }
         }
         VerticalLayout {
@@ -1174,8 +1346,11 @@ component ChatView inherits Rectangle {
     property <bool> stick: true;
     public function focus-composer() { composer.focus-text(); }
     public function focus-to() { if App.new-chat { nch.focus-to(); } }
+    // Where we last put the view; scrolling that we did ourselves isn't the user leaving the bottom.
+    property <length> last-y;
     function to-bottom() {
         sv.content-y = min(0px, sv.visible-height - sv.content-height);
+        root.last-y = sv.content-y;
     }
     // While following the bottom: jump now, and again once the layout has settled, since a
     // change notification can arrive before the view's own size is up to date (seen at 150 %).
@@ -1189,6 +1364,12 @@ component ChatView inherits Rectangle {
         root.stick = true;
         root.to-bottom();
         root.pending-scroll = true;
+    }
+    // Safety net: whatever grew below without telling us, catch up while following.
+    Timer {
+        interval: 250ms;
+        running: root.stick && sv.content-y > sv.visible-height - sv.content-height + 1px;
+        triggered => { root.to-bottom(); }
     }
     Timer {
         interval: 30ms;
@@ -1214,7 +1395,7 @@ component ChatView inherits Rectangle {
             changed visible-height => { root.follow(); }
             changed visible-width => { root.follow(); }
             scrolled => {
-                root.stick = self.content-y <= self.visible-height - self.content-height + 40px;
+                root.stick = self.content-y <= self.visible-height - self.content-height + 40px || abs(self.content-y - root.last-y) < 1px;
             }
             content-width: self.visible-width;
             content-height: max(self.visible-height, list.preferred-height);
@@ -1255,6 +1436,37 @@ component ChatView inherits Rectangle {
         }
         Divider { }
         composer := Composer { }
+    }
+    // Back to the newest message after scrolling up.
+    if !root.stick && App.has-chat: Rectangle {
+        x: parent.width - self.width - 24px;
+        y: composer.y - self.height - 14px;
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
+        background: jta.has-hover ? Theme.surface-3 : Theme.surface;
+        border-width: 1px;
+        border-color: Theme.border;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: Theme.shadow.with-alpha(0.25);
+        Image {
+            source: Icons.arrow-down;
+            width: 18px;
+            height: 18px;
+            colorize: Theme.text;
+        }
+        jta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.stick = true;
+                root.to-bottom();
+            }
+        }
+    }
+    if App.suggest-field >= 0 && App.suggestions.length > 0: SuggestionList {
+        origin-x: root.absolute-position.x;
+        origin-y: root.absolute-position.y;
+        room: root.height;
     }
     if App.people-open && !App.new-chat: PeoplePopup {
         x: parent.width - self.width - 12px;

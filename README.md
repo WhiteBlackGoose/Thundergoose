@@ -92,7 +92,14 @@ from and which one gets it; the bubbles show the way it went.</td>
   the quote back. *Open original* shows the HTML version in your browser with remote content
   blocked.
 - **Reply like a chat.** Type and press <kbd>Ctrl</kbd>+<kbd>Enter</kbd>. Subject and threading
-  headers are filled in; change the subject to start a new topic.
+  headers are filled in; change the subject to start a new topic. The message shows up at once
+  with a progress bar while it goes out, then "✓ Sent"; if the server refuses it, the bubble
+  says why and offers *Retry* or *Edit*. The composer is free for the next message meanwhile.
+- **Cc and Bcc.** *Cc/Bcc* in the composer. Cc'd people join the conversation (the mail files
+  under that group, which also shows in everyone's own chat); Bcc'd people get a hidden copy.
+- **Address suggestions.** To, Cc and Bcc suggest past contacts as you type, fuzzily ("mch"
+  finds Maya Chen), most frequent and recent first. Contacts you ignored or marked as spam, and
+  addresses only ever seen in Junk, are never suggested.
 - **Search** across names, addresses, subjects and message text. Type an address you have no
   conversation with yet to start one.
 - **Instant notifications.** Each account keeps an IMAP IDLE connection, so new mail shows up

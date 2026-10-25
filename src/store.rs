@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS folders(
     PRIMARY KEY(account, name)
 );
 CREATE TABLE IF NOT EXISTS names(addr TEXT PRIMARY KEY, name TEXT NOT NULL, prio INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS addresses(
+    addr TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0, last INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS junk_folders(account TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(account, name));
 CREATE TABLE IF NOT EXISTS contacts(
     key TEXT PRIMARY KEY,
@@ -294,6 +297,9 @@ impl Store {
             }
         };
         self.conn.execute("INSERT OR REPLACE INTO locs(account, folder, uid, mail) VALUES(?1,?2,?3,?4)", params![account, folder, uid, id])?;
+        if inserted {
+            self.note_addresses(std::iter::once(&h.from).chain(&h.to).chain(&h.cc), h.date)?;
+        }
         for person in std::iter::once(&h.from).chain(&h.to).chain(&h.cc) {
             if !person.name.is_empty() && person.name != person.addr {
                 self.conn.execute(
@@ -303,6 +309,60 @@ impl Store {
             }
         }
         Ok((id, inserted))
+    }
+
+    /// Counts the people of a mail in the address book used for suggestions.
+    fn note_addresses<'a>(&self, people: impl Iterator<Item = &'a Person>, date: i64) -> rusqlite::Result<()> {
+        let mut stmt = self.conn.prepare_cached(
+            "INSERT INTO addresses(addr, name, count, last) VALUES(?1, ?2, 1, ?3)
+             ON CONFLICT(addr) DO UPDATE SET count = count + 1, last = max(last, ?3), name = CASE WHEN ?2 != '' THEN ?2 ELSE name END",
+        )?;
+        for p in people {
+            let addr = p.addr.trim().to_lowercase();
+            if addr.contains('@') {
+                let name = if p.name == p.addr { "" } else { p.name.trim() };
+                stmt.execute(params![addr, name, date])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Fills the address book from the stored mail the first time it's needed.
+    pub fn backfill_addresses(&self) -> rusqlite::Result<()> {
+        let have: i64 = self.conn.query_row("SELECT COUNT(*) FROM addresses", [], |r| r.get(0))?;
+        if have > 0 {
+            return Ok(());
+        }
+        let rows: Vec<(String, String, String, i64)> = {
+            let mut stmt = self.conn.prepare("SELECT from_addr, from_name, recipients, date FROM mails")?;
+            let r = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+            r.flatten().collect()
+        };
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        for (addr, name, recipients, date) in rows {
+            let mut people: Vec<Person> = serde_json::from_str(&recipients).unwrap_or_default();
+            people.push(Person { name, addr });
+            self.note_addresses(people.iter(), date)?;
+        }
+        self.conn.execute_batch("COMMIT")
+    }
+
+    /// Everyone you've exchanged mail with: (address, name, mails, newest date).
+    pub fn address_book(&self) -> Vec<(String, String, i64, i64)> {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT a.addr, COALESCE(n.name, a.name), a.count, a.last FROM addresses a LEFT JOIN names n ON n.addr = a.addr",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).map(|rows| rows.flatten().collect()).unwrap_or_default()
+    }
+
+    /// Single-person conversations whose mail is all in Junk folders.
+    pub fn junk_senders(&self) -> HashSet<String> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT peer FROM mails WHERE instr(peer, ',') = 0 GROUP BY peer HAVING SUM(junk) = COUNT(*)") else {
+            return HashSet::new();
+        };
+        stmt.query_map([], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 
     /// Recomputes every mail's conversation after the set of own addresses changed.
@@ -619,6 +679,7 @@ impl Store {
             params![h.msgid, h.date, h.from.addr.to_lowercase(), h.from.name, serde_json::to_string(&recipients).unwrap_or_default(), h.subject, p.peer, h.in_reply_to, account, p.me_addr, raw.len() as i64],
         )?;
         let id: i64 = self.conn.query_row("SELECT id FROM mails WHERE msgid=?1", [&h.msgid], |r| r.get(0))?;
+        self.note_addresses(h.to.iter().chain(&h.cc), h.date)?;
         self.set_body(id, raw, b)?;
         Ok(id)
     }
