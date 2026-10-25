@@ -13,6 +13,9 @@ path = "src/lib.rs"
 [dependencies]
 thundergoose = { path = ".." }
 
+# Its own workspace: cargo-apk wants the package it builds at the root of one.
+[workspace]
+
 # Built with cargo-apk: `cargo apk build --release -p thundergoose-android`.
 [package.metadata.android]
 package = "io.github.whiteblackgoose.thundergoose"

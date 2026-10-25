@@ -6208,13 +6208,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "thundergoose-android"
-version = "1.0.0"
-dependencies = [
- "thundergoose",
-]
-
-[[package]]
 name = "tiff"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

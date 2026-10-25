@@ -172,8 +172,7 @@ without a display.
 
 **Android.** The app is the same library (`src/lib.rs`); `android/` only holds the entry point
 and the APK settings. Build with the Android SDK and NDK installed (`ANDROID_HOME`,
-`ANDROID_NDK_ROOT`): `cargo install cargo-apk` and `cargo apk build --release -p
-thundergoose-android`. Not there yet on Android: attaching and saving files, opening
+`ANDROID_NDK_ROOT`): `cargo install cargo-apk`, then `cargo apk build --release` in `android/`. Not there yet on Android: attaching and saving files, opening
 attachments, syncing while the app is closed, and the Thunderbird import (there is no
 Thunderbird on the phone).
 

@@ -8,9 +8,6 @@ authors = ["WhiteBlackGoose"]
 repository = "https://github.com/WhiteBlackGoose/Thundergoose"
 readme = "README.md"
 
-[workspace]
-members = [".", "android"]
-
 [lib]
 name = "thundergoose"
 path = "src/lib.rs"
