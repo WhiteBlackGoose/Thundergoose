@@ -2,6 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
+/// macOS bundle identifier (also in the app's Info.plist).
+#[cfg(target_os = "macos")]
+const BUNDLE_ID: &str = "io.github.whiteblackgoose.thundergoose";
+
 /// The app icon as a file, for notification servers that want a path.
 fn icon_file(data: &Path) -> Option<PathBuf> {
     let path = data.join("icon.png");
@@ -17,8 +21,18 @@ fn icon_file(data: &Path) -> Option<PathBuf> {
 pub fn show(data: &Path, title: &str, body: &str, on_click: Option<Box<dyn FnOnce() + Send>>) {
     let (title, body, icon) = (title.to_string(), body.to_string(), icon_file(data));
     std::thread::spawn(move || {
+        #[cfg(target_os = "macos")]
+        {
+            static ONCE: std::sync::Once = std::sync::Once::new();
+            ONCE.call_once(|| {
+                let _ = notify_rust::set_application(BUNDLE_ID);
+            });
+        }
         let mut n = notify_rust::Notification::new();
         n.appname("Thundergoose").summary(&title).body(&body);
+        // The installer registers this ID on the Start menu shortcut.
+        #[cfg(target_os = "windows")]
+        n.app_id("Thundergoose");
         #[cfg(all(unix, not(target_os = "macos")))]
         {
             n.hint(notify_rust::Hint::DesktopEntry("thundergoose".into())).hint(notify_rust::Hint::Category("email.arrived".into()));

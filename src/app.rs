@@ -28,6 +28,43 @@ const MAX_PREVIEW_BYTES: usize = 10 * 1024 * 1024;
 const PREVIEW_PX: u32 = 1200;
 
 type PreviewKey = (i64, usize);
+/// A rendering of an HTML mail: mail id, full (with quotes, uncut), remote images loaded.
+type HtmlKey = (i64, bool, bool);
+type HtmlJobs = Arc<Mutex<Vec<(HtmlKey, Option<crate::html::Rendered>)>>>;
+/// Renderings kept in memory.
+const HTML_CACHE: usize = 40;
+
+struct HtmlView {
+    image: slint::Image,
+    links: Vec<crate::html::Link>,
+    css_height: f32,
+    blocked: bool,
+    quoted: bool,
+    cut: bool,
+}
+
+/// One thread renders HTML mail, newest requests first, so fonts load once.
+fn spawn_html_renderer(db: PathBuf, jobs: HtmlJobs) -> Sender<(HtmlKey, f32)> {
+    let (tx, rx) = std::sync::mpsc::channel::<(HtmlKey, f32)>();
+    std::thread::Builder::new()
+        .name("html".into())
+        .spawn(move || {
+            let Ok(store) = Store::open(&db) else { return };
+            while let Ok((key, scale)) = rx.recv() {
+                let (id, full, remote) = key;
+                let raw = store.raw(id);
+                // Blitz is young; a mail that trips it shows as text instead of taking the app down.
+                let rendered = raw.and_then(|raw| {
+                    let html = crate::parse::html(&raw)?;
+                    let inline = crate::parse::inline_parts(&raw);
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::html::render(&html, inline, remote, scale, full))).ok().flatten()
+                });
+                jobs.lock().unwrap().push((key, rendered));
+            }
+        })
+        .expect("spawn html thread");
+    tx
+}
 type PreviewJobs = Arc<Mutex<Vec<(PreviewKey, Option<SharedPixelBuffer<Rgba8Pixel>>)>>>;
 
 fn previewable(a: &crate::store::Attachment) -> bool {
@@ -228,6 +265,18 @@ pub struct Core {
     demo: bool,
     /// The Thunderbird profile on this computer, offered for import.
     tb_found: Option<PathBuf>,
+    /// HTML renderings; `None` while rendering or when it failed.
+    html_cache: HashMap<HtmlKey, Option<HtmlView>>,
+    html_jobs: HtmlJobs,
+    html_tx: Sender<(HtmlKey, f32)>,
+    html_inflight: usize,
+    /// Which rendering each visible mail shows, for link lookups.
+    html_shown: HashMap<i64, HtmlKey>,
+    /// Mails the user switched between formatted and text.
+    format_override: HashMap<i64, bool>,
+    /// Remote images allowed for these mails, or always for these senders.
+    remote_once: HashSet<i64>,
+    remote_senders: HashSet<String>,
 }
 
 thread_local! {
@@ -632,6 +681,8 @@ impl Core {
 
         let me = self.me.read().unwrap().clone();
         let mut want_previews: Vec<PreviewKey> = Vec::new();
+        let mut want_html: Vec<HtmlKey> = Vec::new();
+        let mut shown_html: HashMap<i64, HtmlKey> = HashMap::new();
         let mut items = Vec::with_capacity(self.mails.len());
         let mut prev: Option<&MailRow> = None;
         for m in &self.mails {
@@ -642,6 +693,23 @@ impl Core {
             let elsewhere = m.peer != key;
             let show_sender = (group || elsewhere) && !m.outgoing && (new_day || elsewhere || prev.is_none_or(|p| p.from.addr != m.from.addr || p.outgoing || p.peer != m.peer));
             let expanded = self.expanded.contains(&m.id);
+            let formatted = m.has_html && m.has_body && self.format_override.get(&m.id).copied().unwrap_or(m.rich);
+            let remote = self.remote_once.contains(&m.id) || self.remote_senders.contains(&m.from.addr);
+            let html_key = (m.id, expanded, remote);
+            let html = if formatted {
+                match self.html_cache.get(&html_key) {
+                    Some(v) => v.as_ref(),
+                    None => {
+                        want_html.push(html_key);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            if html.is_some() {
+                shown_html.insert(m.id, html_key);
+            }
             let mut text = if expanded { self.store.raw(m.id).map(|r| crate::parse::full_text(&r)).unwrap_or_else(|| m.text.clone()) } else { m.text.clone() };
             let long = text.len() > MAX_INLINE_TEXT;
             if long && !expanded {
@@ -687,7 +755,15 @@ impl Core {
                 show_sender,
                 subject: if new_subject { m.subject.as_str() } else { "" }.into(),
                 text: text.into(),
-                can_expand: m.quoted || long || expanded,
+                can_expand: match html {
+                    Some(v) => v.quoted || v.cut || expanded,
+                    None => m.quoted || long || expanded,
+                },
+                html: html.map(|v| v.image.clone()).unwrap_or_default(),
+                html_on: html.is_some(),
+                html_height: html.map(|v| v.css_height).unwrap_or(0.0),
+                html_blocked: html.is_some_and(|v| v.blocked) && !remote,
+                html_formatted: formatted,
                 expanded,
                 time: Local.timestamp_opt(m.date, 0).single().map(|t| t.format("%H:%M").to_string()).unwrap_or_default().into(),
                 full_time: Local.timestamp_opt(m.date, 0).single().map(|t| t.format("%A, %-d %B %Y, %H:%M").to_string()).unwrap_or_default().into(),
@@ -719,6 +795,32 @@ impl Core {
             app.set_scroll_token(app.get_scroll_token() + 1);
         }
         self.request_previews(want_previews);
+        self.html_shown = shown_html;
+        self.request_html(want_html);
+    }
+
+    fn request_html(&mut self, mut keys: Vec<HtmlKey>) {
+        if keys.is_empty() {
+            return;
+        }
+        // Make room, keeping what is on screen.
+        if self.html_cache.len() + keys.len() > HTML_CACHE {
+            let shown: HashSet<HtmlKey> = self.html_shown.values().copied().collect();
+            self.html_cache.retain(|k, v| shown.contains(k) || v.is_none());
+        }
+        let scale = self.ui().window().scale_factor();
+        // The newest mail is at the bottom, where the view starts.
+        keys.reverse();
+        for k in keys {
+            self.html_cache.insert(k, None);
+            self.html_inflight += 1;
+            let _ = self.html_tx.send((k, scale));
+        }
+    }
+
+    fn link_at(&self, id: i64, x: f32, y: f32) -> String {
+        let Some(v) = self.html_shown.get(&id).and_then(|k| self.html_cache.get(k)).and_then(|v| v.as_ref()) else { return String::new() };
+        v.links.iter().find(|l| x >= l.rect.0 && x < l.rect.0 + l.rect.2 && y >= l.rect.1 && y < l.rect.1 + l.rect.3).map(|l| l.url.clone()).unwrap_or_default()
     }
 
     fn request_previews(&mut self, keys: Vec<PreviewKey>) {
@@ -1166,6 +1268,24 @@ impl Core {
                 self.load_conversation(false);
             }
         }
+        let rendered: Vec<_> = std::mem::take(&mut *self.html_jobs.lock().unwrap());
+        if !rendered.is_empty() {
+            self.html_inflight = self.html_inflight.saturating_sub(rendered.len());
+            for (k, r) in rendered {
+                match r {
+                    Some(r) => {
+                        let view = HtmlView { image: slint::Image::from_rgba8(r.pixels), links: r.links, css_height: r.css_height, blocked: r.blocked, quoted: r.quoted, cut: r.cut };
+                        self.html_cache.insert(k, Some(view));
+                    }
+                    None => {
+                        // Couldn't render: show this mail as text.
+                        self.html_cache.remove(&k);
+                        self.format_override.insert(k.0, false);
+                    }
+                }
+            }
+            self.load_conversation(false);
+        }
         let done: Vec<_> = std::mem::take(&mut *self.preview_jobs.lock().unwrap());
         if !done.is_empty() {
             self.previews_inflight = self.previews_inflight.saturating_sub(done.len());
@@ -1279,6 +1399,9 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         accounts.iter().map(|a| (a.id.clone(), sync::spawn(a.clone(), me.clone(), creds.clone(), shared.clone(), &paths))).collect()
     };
     let favicons = Favicons::new(&paths.data);
+    let html_jobs: HtmlJobs = Arc::default();
+    let html_tx = spawn_html_renderer(paths.db(), html_jobs.clone());
+    let remote_senders = store.remote_image_senders();
 
     let ui = AppWindow::new()?;
     let app = ui.global::<App>();
@@ -1329,6 +1452,14 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         self_to: String::new(),
         demo,
         tb_found: profile,
+        html_cache: HashMap::new(),
+        html_jobs,
+        html_tx,
+        html_inflight: 0,
+        html_shown: HashMap::new(),
+        format_override: HashMap::new(),
+        remote_once: HashSet::new(),
+        remote_senders,
     }));
     CORE.with(|c| *c.borrow_mut() = Some(core.clone()));
 
@@ -1401,6 +1532,52 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
             if !c.expanded.remove(&id) {
                 c.expanded.insert(id);
             }
+            c.load_conversation(false);
+        })
+    });
+    app.on_link_at(|id, x, y| {
+        let mut url = String::new();
+        with_core(|c| url = c.link_at(id as i64, x, y));
+        url.into()
+    });
+    app.on_short_url(|url| {
+        let s = url.as_str();
+        if s.chars().count() > 90 { format!("{}…", s.chars().take(90).collect::<String>()).into() } else { url }
+    });
+    app.on_open_link(|url| {
+        with_core(|c| {
+            if let Some(addr) = url.strip_prefix("mailto:") {
+                // Writing to someone stays in Thundergoose.
+                let addr = addr.split('?').next().unwrap_or(addr).to_string();
+                let key = c.key_for(&[addr]);
+                c.open_peer(key);
+            } else if let Err(e) = open::that_detached(url.as_str()) {
+                c.toast(format!("Cannot open link: {e}"), true);
+            }
+        })
+    });
+    app.on_load_images(|id, always| {
+        with_core(|c| {
+            let id = id as i64;
+            if always {
+                if let Some(m) = c.find_mail(id as i32) {
+                    let from = m.from.addr.clone();
+                    c.store.set_remote_images(&from, true);
+                    c.toast(format!("Images from {from} will always load"), false);
+                    c.remote_senders.insert(from);
+                }
+            } else {
+                c.remote_once.insert(id);
+            }
+            c.load_conversation(false);
+        })
+    });
+    app.on_toggle_format(|id| {
+        with_core(|c| {
+            let id = id as i64;
+            let Some(m) = c.find_mail(id as i32) else { return };
+            let now = c.format_override.get(&id).copied().unwrap_or(m.rich);
+            c.format_override.insert(id, !now);
             c.load_conversation(false);
         })
     });
@@ -1791,6 +1968,6 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
 /// Whether background work that changes the picture (icons, previews) is still going on.
 pub(crate) fn busy() -> bool {
     let mut busy = false;
-    with_core(|c| busy = c.favicons.busy() || c.previews_inflight > 0);
+    with_core(|c| busy = c.favicons.busy() || c.previews_inflight > 0 || c.html_inflight > 0);
     busy
 }

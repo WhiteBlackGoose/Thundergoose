@@ -75,6 +75,15 @@ export struct MessageItem {
     junk: bool,
     loading: bool,
     has-html: bool,
+    /// The HTML version, rendered; shown instead of the text when `html-on`.
+    html: image,
+    html-on: bool,
+    /// Height of the rendering in CSS pixels (its width is 620).
+    html-height: float,
+    /// Remote images were left out.
+    html-blocked: bool,
+    /// Showing (or about to show) the formatted version rather than the text.
+    html-formatted: bool,
     unread: bool,
     attachments: [AttachmentItem],
     /// Set when group mail shows up in a one-person conversation.
@@ -194,6 +203,13 @@ export global App {
     callback load-earlier();
     callback toggle-message(int);
     callback open-html(int);
+    /// The link at CSS coordinates of a rendered mail, or "".
+    pure callback link-at(int, float, float) -> string;
+    pure callback short-url(string) -> string;
+    callback open-link(string);
+    /// Load remote images of a mail; `true`: always for its sender.
+    callback load-images(int, bool);
+    callback toggle-format(int);
     callback open-attachment(int, int);
     callback save-attachment(int, int);
     callback copy(string);

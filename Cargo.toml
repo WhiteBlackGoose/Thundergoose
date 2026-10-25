@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "An email client that treats mail as conversations with people"
 license = "MIT"
+authors = ["WhiteBlackGoose"]
+repository = "https://github.com/WhiteBlackGoose/Thundergoose"
+readme = "README.md"
 
 [[bin]]
 name = "thundergoose"
@@ -37,7 +40,49 @@ open = "5"
 notify-rust = "4"
 arboard = { version = "3", features = ["wayland-data-control"] }
 html-escape = "0.2"
+blitz-html = "0.3.0-beta.4"
+blitz-dom = { version = "0.3.0-beta.4", features = ["floats"] }
+blitz-paint = "0.3.0-beta.4"
+blitz-traits = "0.3.0-beta.4"
+anyrender = "0.14"
+anyrender_vello_cpu = "0.18"
 image = { version = "0.25", default-features = false, features = ["png", "ico", "jpeg", "gif", "webp", "bmp"] }
+
+[package.metadata.deb]
+maintainer = "WhiteBlackGoose"
+section = "mail"
+extended-description = "Thundergoose shows email as conversations with people: every mail between you and a person or group, both directions, across all your accounts."
+# Wayland, X11, xkbcommon and GL are loaded at runtime.
+depends = "$auto, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libwayland-cursor0, libwayland-egl1, libegl1, libgl1, libx11-6, libxcursor1, libxrandr2, libxi6"
+assets = [
+    ["target/release/thundergoose", "usr/bin/", "755"],
+    ["packaging/thundergoose.desktop", "usr/share/applications/", "644"],
+    ["packaging/thundergoose.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["packaging/thundergoose-256.png", "usr/share/icons/hicolor/256x256/apps/thundergoose.png", "644"],
+    ["README.md", "usr/share/doc/thundergoose/", "644"],
+]
+
+[package.metadata.generate-rpm]
+summary = "Email as conversations with people"
+assets = [
+    { source = "target/release/thundergoose", dest = "/usr/bin/thundergoose", mode = "755" },
+    { source = "packaging/thundergoose.desktop", dest = "/usr/share/applications/thundergoose.desktop", mode = "644" },
+    { source = "packaging/thundergoose.svg", dest = "/usr/share/icons/hicolor/scalable/apps/thundergoose.svg", mode = "644" },
+    { source = "packaging/thundergoose-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/thundergoose.png", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/thundergoose/README.md", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+libxkbcommon = "*"
+libxkbcommon-x11 = "*"
+libwayland-client = "*"
+libwayland-cursor = "*"
+libwayland-egl = "*"
+libglvnd-egl = "*"
+libX11 = "*"
+libXcursor = "*"
+libXrandr = "*"
+libXi = "*"
 
 [build-dependencies]
 slint-build = "1.18"

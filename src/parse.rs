@@ -206,6 +206,12 @@ pub fn html(raw: &[u8]) -> Option<String> {
     m.body_html(0).map(|h| h.into_owned())
 }
 
+/// Parts an HTML body refers to by Content-ID (`cid:`), keyed without angle brackets.
+pub fn inline_parts(raw: &[u8]) -> std::collections::HashMap<String, Vec<u8>> {
+    let Some(m) = MessageParser::default().parse(raw) else { return Default::default() };
+    m.parts.iter().filter_map(|p| Some((p.content_id()?.trim_matches(['<', '>']).to_string(), p.contents().to_vec()))).collect()
+}
+
 pub fn attachment_bytes(raw: &[u8], index: usize) -> Option<Vec<u8>> {
     let m = MessageParser::default().parse(raw)?;
     let part = m.attachment(index as u32)?;
@@ -217,7 +223,7 @@ const INLINE_PHOTO_MIN: usize = 100 * 1024;
 
 pub fn body(raw: &[u8]) -> Body {
     let Some(m) = MessageParser::default().parse(raw) else {
-        return Body { text: String::new(), quoted: false, has_html: false, attachments: Vec::new(), refs: String::new(), snippet: String::new() };
+        return Body { rich: false, text: String::new(), quoted: false, has_html: false, attachments: Vec::new(), refs: String::new(), snippet: String::new() };
     };
     let mut full = clean(&m.body_text(0).map(|t| t.into_owned()).unwrap_or_default());
     if m.text_part(0).is_some_and(|p| p.is_text_html()) {
@@ -259,7 +265,8 @@ pub fn body(raw: &[u8]) -> Body {
         Some(subj) if shown.chars().count() > 280 && !subj.trim().is_empty() => snippet(subj),
         _ => snippet(shown),
     };
-    Body { text: if text.is_empty() { full.trim().to_string() } else { text }, quoted, has_html, attachments, refs, snippet: snip }
+    let rich = has_html && m.body_html(0).is_some_and(|h| crate::html::is_rich(&h));
+    Body { rich, text: if text.is_empty() { full.trim().to_string() } else { text }, quoted, has_html, attachments, refs, snippet: snip }
 }
 
 #[cfg(test)]

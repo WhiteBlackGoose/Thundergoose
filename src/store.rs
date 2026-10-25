@@ -75,7 +75,12 @@ pub enum Flag {
 }
 
 /// Columns added after the first release, as (table, column, declaration).
-const ADDED_COLUMNS: &[(&str, &str, &str)] = &[("mails", "junk", "INTEGER NOT NULL DEFAULT 0"), ("contacts", "spam", "INTEGER NOT NULL DEFAULT 0")];
+const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
+    ("mails", "junk", "INTEGER NOT NULL DEFAULT 0"),
+    ("mails", "rich", "INTEGER NOT NULL DEFAULT 0"),
+    ("contacts", "spam", "INTEGER NOT NULL DEFAULT 0"),
+    ("contacts", "remote_images", "INTEGER NOT NULL DEFAULT 0"),
+];
 
 /// SQL value: whether mail `m` lives only in Junk folders.
 const JUNK_EXPR: &str = "(EXISTS(SELECT 1 FROM locs l JOIN junk_folders j ON j.account=l.account AND j.name=l.folder WHERE l.mail=m.id)
@@ -92,7 +97,7 @@ fn conversation_filter(peer: &str) -> &'static str {
 }
 
 /// Bump when `parse::body` changes so stored bodies get parsed again.
-pub const PARSE_VERSION: i32 = 7;
+pub const PARSE_VERSION: i32 = 8;
 
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let c = Connection::open(path)?;
@@ -162,6 +167,8 @@ pub fn place(h: &Header, me: &HashSet<String>, account_email: &str) -> Placement
 }
 
 pub struct Body {
+    /// The HTML version has layout worth showing (see `html::is_rich`).
+    pub rich: bool,
     pub text: String,
     pub quoted: bool,
     pub has_html: bool,
@@ -211,6 +218,7 @@ pub struct MailRow {
     pub recipients: Vec<Person>,
     /// Only in Junk folders.
     pub junk: bool,
+    pub rich: bool,
 }
 
 impl Store {
@@ -342,6 +350,16 @@ impl Store {
         let _ = self.conn.execute(&format!("INSERT INTO contacts(key, {col}) VALUES(?1, ?2) ON CONFLICT(key) DO UPDATE SET {col}=?2"), params![key, on]);
     }
 
+    /// Senders whose remote images load without asking.
+    pub fn remote_image_senders(&self) -> HashSet<String> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT key FROM contacts WHERE remote_images=1") else { return HashSet::new() };
+        stmt.query_map([], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default()
+    }
+
+    pub fn set_remote_images(&self, sender: &str, on: bool) {
+        let _ = self.conn.execute("INSERT INTO contacts(key, remote_images) VALUES(?1, ?2) ON CONFLICT(key) DO UPDATE SET remote_images=?2", params![sender, on]);
+    }
+
     pub fn set_spam(&self, key: &str, value: i32) {
         let _ = self.conn.execute("INSERT INTO contacts(key, spam) VALUES(?1, ?2) ON CONFLICT(key) DO UPDATE SET spam=?2", params![key, value]);
     }
@@ -364,8 +382,8 @@ impl Store {
     pub fn set_body(&self, id: i64, raw: &[u8], b: &Body) -> rusqlite::Result<()> {
         self.conn.execute("INSERT OR REPLACE INTO raw(mail, data) VALUES(?1, ?2)", params![id, raw])?;
         self.conn.execute(
-            "UPDATE mails SET has_body=1, text=?2, quoted=?3, has_html=?4, attachments=?5, refs=?6, snippet=?7 WHERE id=?1",
-            params![id, b.text, b.quoted, b.has_html, serde_json::to_string(&b.attachments).unwrap_or_default(), b.refs, b.snippet],
+            "UPDATE mails SET has_body=1, text=?2, quoted=?3, has_html=?4, attachments=?5, refs=?6, snippet=?7, rich=?8 WHERE id=?1",
+            params![id, b.text, b.quoted, b.has_html, serde_json::to_string(&b.attachments).unwrap_or_default(), b.refs, b.snippet, b.rich],
         )?;
         Ok(())
     }
@@ -392,8 +410,8 @@ impl Store {
                 if let Some(raw) = self.raw(id) {
                     let body = crate::parse::body(&raw);
                     self.conn.execute(
-                        "UPDATE mails SET text=?2, quoted=?3, has_html=?4, attachments=?5, refs=?6, snippet=?7 WHERE id=?1",
-                        params![id, body.text, body.quoted, body.has_html, serde_json::to_string(&body.attachments).unwrap_or_default(), body.refs, body.snippet],
+                        "UPDATE mails SET text=?2, quoted=?3, has_html=?4, attachments=?5, refs=?6, snippet=?7, rich=?8 WHERE id=?1",
+                        params![id, body.text, body.quoted, body.has_html, serde_json::to_string(&body.attachments).unwrap_or_default(), body.refs, body.snippet, body.rich],
                     )?;
                 }
             }
@@ -535,7 +553,7 @@ impl Store {
         let filter = conversation_filter(peer);
         let total: i64 = self.conn.query_row(&format!("SELECT COUNT(*) FROM mails WHERE {filter}"), [peer], |r| r.get(0)).unwrap_or(0);
         let Ok(mut stmt) = self.conn.prepare(&format!(
-            "SELECT id, msgid, date, from_addr, from_name, subject, outgoing, seen, account, me_addr, has_body, text, quoted, has_html, attachments, refs, in_reply_to, peer, recipients, junk
+            "SELECT id, msgid, date, from_addr, from_name, subject, outgoing, seen, account, me_addr, has_body, text, quoted, has_html, attachments, refs, in_reply_to, peer, recipients, junk, rich
              FROM mails WHERE {filter} ORDER BY date DESC LIMIT ?2"
         )) else {
             return (Vec::new(), total);
@@ -562,6 +580,7 @@ impl Store {
                     peer: r.get(17)?,
                     recipients: serde_json::from_str(&r.get::<_, String>(18)?).unwrap_or_default(),
                     junk: r.get(19)?,
+                    rich: r.get(20)?,
                 })
             })
             .map(|rows| rows.flatten().collect::<Vec<_>>())

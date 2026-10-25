@@ -6,6 +6,7 @@ mod config;
 mod creds;
 mod demo;
 mod favicon;
+mod html;
 mod imapc;
 mod notify;
 mod nss;

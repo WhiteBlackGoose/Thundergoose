@@ -66,7 +66,7 @@ pub fn take(out: &Path) -> Result<(), PlatformError> {
     let open = |key: &str| crate::app::with_core(|c| c.open_peer(key.to_string()));
 
     // Everything opened once first, so icons and previews are ready for every picture.
-    for key in ["leo@park.example,maya@chen.example,priya@natarajan.example", "", "maya@chen.example"] {
+    for key in ["orders@trailhead-outfitters.example", "leo@park.example,maya@chen.example,priya@natarajan.example", "", "maya@chen.example"] {
         open(key);
         settle();
     }
@@ -87,6 +87,11 @@ pub fn take(out: &Path) -> Result<(), PlatformError> {
     open("");
     settle();
     save(&window, &out.join("yourself-dark.png"));
+
+    look(2, 0);
+    open("orders@trailhead-outfitters.example");
+    settle();
+    save(&window, &out.join("html-dark.png"));
 
     look(1, 3);
     crate::app::with_core(|c| c.set_tab(3));

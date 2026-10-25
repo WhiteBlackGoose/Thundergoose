@@ -485,6 +485,43 @@ component ImagePreview inherits Rectangle {
     }
 }
 
+/// A rendered HTML mail: a picture of the page with clickable links.
+component HtmlCard inherits Rectangle {
+    in property <MessageItem> m;
+    in property <length> max-w;
+    property <string> url: ta.has-hover ? App.link-at(root.m.id, ta.mouse-x / root.width * 620, ta.mouse-y / root.width * 620) : "";
+    width: min(root.max-w, 620px);
+    height: self.width * root.m.html-height / 620;
+    border-radius: 10px;
+    clip: true;
+    background: #ffffff;
+    border-width: 1px;
+    border-color: Theme.border;
+    Image {
+        source: root.m.html;
+        width: parent.width;
+        height: parent.height;
+        image-fit: fill;
+    }
+    ta := TouchArea {
+        mouse-cursor: root.url != "" ? pointer : default;
+        clicked => {
+            if root.url != "" {
+                Tip.hide();
+                App.open-link(root.url);
+            }
+        }
+    }
+    // The real address of a link, before you click it.
+    changed url => {
+        if root.url != "" {
+            Tip.show(App.short-url(root.url), root.absolute-position.x + ta.mouse-x + 12px, root.absolute-position.y + ta.mouse-y + 18px);
+        } else {
+            Tip.hide();
+        }
+    }
+}
+
 component MessageRow inherits VerticalLayout {
     in property <MessageItem> m;
     in property <length> avail;
@@ -560,7 +597,35 @@ component MessageRow inherits VerticalLayout {
                     font-size: Theme.font-md;
                     font-italic: true;
                 }
-                if root.m.text != "": TextInput {
+                if root.m.html-blocked: HorizontalLayout {
+                    spacing: 8px;
+                    Image {
+                        source: Icons.info;
+                        width: 13px;
+                        height: 13px;
+                        y: (parent.height - self.height) / 2;
+                        colorize: Theme.text-faint;
+                    }
+                    Text {
+                        text: @tr("Remote images blocked");
+                        color: Theme.text-muted;
+                        font-size: Theme.font-sm;
+                        vertical-alignment: center;
+                    }
+                    LinkText {
+                        text: @tr("Load images");
+                        clicked => { App.load-images(root.m.id, false); }
+                    }
+                    LinkText {
+                        text: @tr("Always from this sender");
+                        clicked => { App.load-images(root.m.id, true); }
+                    }
+                }
+                if root.m.html-on: HtmlCard {
+                    m: root.m;
+                    max-w: root.avail * 0.76 - 26px;
+                }
+                if root.m.text != "" && !root.m.html-on: TextInput {
                     text: root.m.text;
                     read-only: true;
                     single-line: false;
@@ -593,8 +658,13 @@ component MessageRow inherits VerticalLayout {
                         text: root.m.expanded ? @tr("Show less") : @tr("Show full message");
                         clicked => { App.toggle-message(root.m.id); }
                     }
+                    if root.m.has-html && !root.m.loading: LinkText {
+                        text: root.m.html-formatted ? @tr("Show as text") : @tr("Show formatted");
+                        clicked => { App.toggle-format(root.m.id); }
+                    }
                     if root.m.has-html: LinkText {
-                        text: @tr("Open original");
+                        text: @tr("Open in browser");
+                        subtle: true;
                         clicked => { App.open-html(root.m.id); }
                     }
                     LinkText {

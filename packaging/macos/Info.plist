@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>Thundergoose</string>
+    <key>CFBundleDisplayName</key><string>Thundergoose</string>
+    <key>CFBundleIdentifier</key><string>io.github.whiteblackgoose.thundergoose</string>
+    <key>CFBundleExecutable</key><string>thundergoose</string>
+    <key>CFBundleIconFile</key><string>thundergoose</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleVersion</key><string>VERSION</string>
+    <key>CFBundleShortVersionString</key><string>VERSION</string>
+    <key>LSMinimumSystemVersion</key><string>11.0</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+    <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>

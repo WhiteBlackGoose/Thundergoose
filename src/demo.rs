@@ -29,6 +29,7 @@ const PEOPLE: &[(&str, &str)] = &[
     ("Mega Deals", "deals@mega-deals.example"),
     ("Billing", "billing@secure-renewal.example"),
     ("Prize Office", "office@lucky-draw.example"),
+    ("Trailhead Outfitters", "orders@trailhead-outfitters.example"),
 ];
 const ME: usize = 0;
 const WORK: usize = 1;
@@ -45,6 +46,7 @@ const RUST: usize = 11;
 const DEALS: usize = 12;
 const BILLING: usize = 13;
 const PRIZE: usize = 14;
+const SHOP: usize = 15;
 
 enum File {
     Photo(u8, &'static str),
@@ -62,15 +64,21 @@ struct Mail {
     file: Option<File>,
     /// Lives in the Junk folder.
     junk: bool,
+    /// An HTML version, with `cid:photo` as an embedded picture.
+    html: Option<&'static str>,
 }
 
 const fn m(when: (i64, u32, u32), from: usize, to: &'static [usize], subject: &'static str, text: &'static str) -> Mail {
-    Mail { when, from, to, subject, text, seen: true, file: None, junk: false }
+    Mail { when, from, to, subject, text, seen: true, file: None, junk: false, html: None }
 }
 
 impl Mail {
     const fn unread(mut self) -> Self {
         self.seen = false;
+        self
+    }
+    const fn html(mut self, html: &'static str) -> Self {
+        self.html = Some(html);
         self
     }
     const fn junk(mut self) -> Self {
@@ -119,6 +127,7 @@ fn mails() -> Vec<Mail> {
         m((0, 6, 0), NIXOS, &[ME], "[NixOS Discourse] Summary", "Here's a summary of what happened this week:\n\n• Flakes in practice: share your setups\n• The new graphical installer\n• Release schedule for 26.11").unread(),
         m((5, 6, 0), RUST, &[ME], "[Rust Users] Weekly digest", "Popular topics this week:\n\n• Async traits in practice\n• Building a desktop GUI with Slint\n• Error handling patterns for libraries"),
         m((0, 5, 12), DEALS, &[ME], "Only today: 70% off everything!!!", "Don't miss out! Our biggest sale of the year ends at midnight.").unread(),
+        m((0, 7, 15), SHOP, &[ME], "Your order #TH-20418 is on its way", "Hi Sam, your order #TH-20418 has shipped and arrives on Thursday.").html(ORDER_HTML).unread(),
         // Spam folder
         m((0, 4, 41), BILLING, &[ME], "Your subscription will expire soon", "Dear Customer,\n\nyour subscription will expire in 2 days. To avoid interruption of your service, renew now:\n\nhttps://renew-now.example/account?id=7f3a9c\n\nBilling Department").unread().junk(),
         m((1, 3, 12), PRIZE, &[WORK], "Congratulations, you have been selected", "Dear Winner,\n\nyour email address was selected in our annual draw. To claim your prize of $1,500,000, reply with your full name and bank details.\n\nMr. D. Richards").unread().junk(),
@@ -127,6 +136,28 @@ fn mails() -> Vec<Mail> {
         m((0, 7, 50), WORK, &[ME], "Whiteboard", "Whiteboard from the planning session, for Thursday.").with(File::Photo(1, "whiteboard.jpg")),
     ]
 }
+
+const ORDER_HTML: &str = r##"<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body{margin:0;background:#eef1ec;font-family:Helvetica,Arial,sans-serif;color:#26302b}
+.card{background:#fff;border-radius:10px;margin:24px auto;width:560px}
+.head{background:#2f5d50;color:#fff;padding:18px 28px;border-radius:10px 10px 0 0;font-size:20px;font-weight:bold;letter-spacing:.5px}
+.body{padding:24px 28px}
+.btn{display:inline-block;background:#e8710a;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold}
+td{font-size:15px}
+.muted{color:#7a857f;font-size:12px}
+</style></head><body>
+<div class="card"><div class="head">Trailhead Outfitters</div><div class="body">
+<h2 style="margin:0 0 6px">Your order is on its way</h2>
+<p style="margin:0 0 18px;line-height:1.5">Hi Sam, good news: order <b>#TH-20418</b> left our warehouse today and should arrive on <b>Thursday</b>.</p>
+<table width="100%" cellspacing="0" cellpadding="0" style="border-top:1px solid #e3e7e4;border-bottom:1px solid #e3e7e4">
+<tr><td style="padding:14px 0;width:96px"><img src="cid:photo" width="80" height="80" style="border-radius:8px"></td>
+<td style="padding:14px 12px">Ridgeline 38L hiking backpack<br><span class="muted">Color: Forest green · Qty 1</span></td>
+<td style="padding:14px 0;text-align:right"><b>€129.00</b></td></tr>
+<tr><td></td><td style="padding:10px 12px">Shipping</td><td style="padding:10px 0;text-align:right">€0.00</td></tr>
+</table>
+<p style="margin:20px 0"><a class="btn" href="https://trailhead-outfitters.example/track/TH-20418">Track your parcel</a></p>
+<p class="muted">Questions? Just reply to this email. Trailhead Outfitters · Sample Street 1 · 12345 Example Town<br><a href="https://trailhead-outfitters.example/unsubscribe">Unsubscribe</a> · <img src="https://tracking.trailhead-outfitters.example/open.gif" width="1" height="1"></p>
+</div></div></body></html>"##;
 
 fn mailbox(i: usize) -> Mailbox {
     let (name, addr) = PEOPLE[i];
@@ -236,6 +267,17 @@ fn raw_message(n: usize, mail: &Mail, text: &str, date: i64) -> Vec<u8> {
         .message_id(Some(format!("<demo-{n}@thundergoose.example>")));
     for &t in mail.to {
         b = b.to(mailbox(t));
+    }
+    if let Some(html) = mail.html {
+        let photo = image::imageops::thumbnail(&image::load_from_memory(&photo(1)).expect("photo").to_rgb8(), 240, 240);
+        let mut png = std::io::Cursor::new(Vec::new());
+        let _ = photo.write_to(&mut png, image::ImageFormat::Png);
+        let body = MultiPart::alternative().singlepart(SinglePart::plain(text.to_string())).multipart(
+            MultiPart::related()
+                .singlepart(SinglePart::html(html.to_string()))
+                .singlepart(Attachment::new_inline("photo".into()).body(png.into_inner(), ContentType::parse("image/png").expect("mime"))),
+        );
+        return b.multipart(body).expect("demo message").formatted();
     }
     let msg = match &mail.file {
         None => b.header(ContentType::TEXT_PLAIN).body(text.to_string()),

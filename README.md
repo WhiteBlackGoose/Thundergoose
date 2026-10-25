@@ -61,6 +61,12 @@ from and which one gets it; the bubbles show the way it went.</td>
 - **Website icons.** Contacts at companies and organisations get their site's icon, fetched once
   from their domain and cached. Addresses at Gmail, Outlook, GMX, Proton and about a hundred other
   mailbox providers keep their initials. Can be switched off in Settings.
+- **HTML mail, rendered in the conversation.** Newsletters, receipts and anything with real
+  layout are drawn inside the bubble by [Blitz](https://github.com/DioxusLabs/blitz), a Rust
+  HTML/CSS engine: tables, buttons, embedded pictures. Quoted history is cut like in plain text.
+  Links are clickable and show their real address on hover, which helps against phishing.
+  Remote images (and the tracking pixels among them) stay blocked until you click *Load images*
+  or *Always from this sender*. *Show as text* switches any mail to plain text.
 - **Pictures inline.** Image attachments up to 10 MiB show right in the bubble (rotated the way
   the camera meant); click to open, hover to save. Everything else is a one-click attachment chip.
 - **Your Thunderbird accounts, if you want them.** On first start Thundergoose offers to take
@@ -93,15 +99,30 @@ from and which one gets it; the bubbles show the way it went.</td>
 
 <table>
 <tr>
+<td width="50%"><img src="docs/html-dark.png" alt="An HTML order confirmation rendered inside the conversation"></td>
 <td width="50%"><img src="docs/spam-light.png" alt="The Spam tab with mail from the Junk folder"></td>
-<td width="50%"><img src="docs/settings-light.png" alt="Settings: accounts, notifications, appearance"></td>
 </tr>
 <tr>
+<td><b>HTML mail.</b> Rendered in place, with embedded pictures; remote images only when you
+allow them.</td>
 <td><b>Spam tab.</b> Conversations whose mail sits only in a Junk folder land here, as do chats
 you mark as spam. They never notify.</td>
-<td><b>Settings.</b> Accounts, Thunderbird import, notifications, website icons, theme and accent.</td>
 </tr>
 </table>
+
+<p align="center"><img src="docs/settings-light.png" alt="Settings: accounts, notifications, appearance" width="70%"></p>
+
+## Install
+
+Download the latest build from [Releases](https://github.com/WhiteBlackGoose/Thundergoose/releases):
+
+| System | File | |
+| --- | --- | --- |
+| Ubuntu 22.04+, Debian 12+ | `…-ubuntu-amd64.deb` | `sudo apt install ./Thundergoose-*.deb` |
+| Fedora | `…-fedora-x86_64.rpm` | `sudo dnf install ./Thundergoose-*.rpm` |
+| Windows 10/11 | `…-windows-x64-setup.exe` | Installer (no admin rights needed); a portable `.exe` is attached too |
+| macOS 11+ (Apple silicon and Intel) | `…-macos-universal.dmg` | Not notarized: the first time, right-click the app → *Open* |
+| NixOS / Nix | | `nix run github:WhiteBlackGoose/Thundergoose` |
 
 ## Try it
 
@@ -116,6 +137,10 @@ libraries. `nix build` produces a wrapped binary with a desktop file and icon.
 
 `thundergoose --screenshots docs` renders the pictures in this README from the demo data,
 without a display.
+
+**Releases** are built by [`.github/workflows/release.yml`](.github/workflows/release.yml):
+every push to `main` builds all packages as workflow artifacts, and pushing a tag `vX.Y.Z`
+(after setting that version in `Cargo.toml`) publishes them as a GitHub release.
 
 ## Your Thunderbird accounts, without setting anything up
 
@@ -179,6 +204,7 @@ directory.
 | `src/imapc.rs`, `src/sync.rs` | IMAP connections; one sync thread per account |
 | `src/store.rs` | SQLite cache: mails (one per Message-ID), server locations, names |
 | `src/parse.rs` | Envelopes, bodies, quote stripping, attachments |
+| `src/html.rs` | Rendering HTML mail (Blitz), links, embedded and remote images |
 | `src/send.rs` | SMTP sending (password or XOAUTH2) |
 | `src/autoconfig.rs` | Finding servers for a new address |
 | `src/notify.rs` | Desktop notifications and the chime |
