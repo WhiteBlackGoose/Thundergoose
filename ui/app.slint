@@ -294,33 +294,31 @@ component Sidebar inherits Rectangle {
                 accepted => { App.search-accepted(); }
             }
         }
-        // Account filter
-        Flickable {
+        // Account filter, only worth having with more than one account. Scrolls sideways when
+        // the chips don't fit; the Flickable takes its size from a plain Rectangle, because
+        // inside the layout directly it came out too narrow and cut the chips off (issue #1).
+        if App.accounts.length > 1: Rectangle {
             height: 28px;
-            content-width: chips.preferred-width + 24px;
-            interactive: true;
-            chips := HorizontalLayout {
-                x: 12px;
-                spacing: 6px;
-                Chip {
-                    text: @tr("Unread");
-                    icon: Icons.mail;
-                    active: App.unread-only;
-                    tip: @tr("Only conversations with unread mail, in every tab");
-                    clicked => { App.set-unread-only(!App.unread-only); }
-                }
-                Rectangle { width: 1px; height: 18px; y: 4px; background: Theme.border; }
-                Chip {
-                    text: @tr("All");
-                    active: App.account-filter == -1;
-                    clicked => { App.filter(-1); }
-                }
-                for a[i] in App.accounts: Chip {
-                    text: a.label;
-                    dot: a.needs-login ? Theme.danger : !a.online ? Theme.text-faint : a.hue;
-                    active: App.account-filter == i;
-                    tip: a.email + (a.message != "" ? " — " + a.message : "");
-                    clicked => { App.filter(i); }
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+                content-width: max(self.width, chips.preferred-width + 24px);
+                chips := HorizontalLayout {
+                    x: 12px;
+                    width: self.preferred-width;
+                    spacing: 6px;
+                    Chip {
+                        text: @tr("All");
+                        active: App.account-filter == -1;
+                        clicked => { App.filter(-1); }
+                    }
+                    for a[i] in App.accounts: Chip {
+                        text: a.label;
+                        dot: a.needs-login ? Theme.danger : !a.online ? Theme.text-faint : a.hue;
+                        active: App.account-filter == i;
+                        tip: a.email + (a.message != "" ? " — " + a.message : "");
+                        clicked => { App.filter(i); }
+                    }
                 }
             }
         }
@@ -336,6 +334,17 @@ component Sidebar inherits Rectangle {
                 ];
                 selected <=> App.tab;
                 changed(i) => { App.set-tab(i); }
+            }
+            VerticalLayout {
+                alignment: center;
+                padding-left: 6px;
+                IconButton {
+                    icon: Icons.mail;
+                    active: App.unread-only;
+                    tip: App.unread-only ? @tr("Show all conversations") : @tr("Only unread, in every tab");
+                    tip-side: 3;
+                    clicked => { App.set-unread-only(!App.unread-only); }
+                }
             }
         }
         Divider { }
@@ -1250,7 +1259,7 @@ component TagColorPicker inherits Rectangle {
         x: 0;
         y: root.height + 6px;
         width: 8 * 30px + 20px;
-        height: 2 * 30px + 54px;
+        height: 2 * 30px + 44px;
         Card {
             VerticalLayout {
                 padding: 10px;
@@ -1359,8 +1368,8 @@ component AccountRow inherits Rectangle {
                 }
             }
         }
-        // How chats and messages refer to this account.
-        HorizontalLayout {
+        // How chats and messages refer to this account; with one account there are no tags.
+        if App.accounts.length > 1: HorizontalLayout {
             spacing: 8px;
             padding-left: 19px;
             TagColorPicker {

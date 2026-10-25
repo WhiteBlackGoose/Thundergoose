@@ -106,6 +106,24 @@ pub fn take(out: &Path) -> Result<(), PlatformError> {
     settle();
     save(&window, &out.join("settings-light.png"));
 
+    // The tag color picker stays open while sync status keeps updating (not used in the README).
+    if std::env::var_os("THUNDERGOOSE_SHOT_PICKER").is_some() {
+        let click = |x: f32, y: f32| {
+            use slint::platform::PointerEventButton;
+            let position = LogicalPosition::new(x, y);
+            window.dispatch_event(WindowEvent::PointerMoved { position });
+            window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+            window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+        };
+        click(384.0, 184.0);
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(4) {
+            slint::platform::update_timers_and_animations();
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        save(&window, &out.join("picker.png"));
+    }
+
     // First start on a computer with Thunderbird (not used in the README).
     if std::env::var_os("THUNDERGOOSE_SHOT_WELCOME").is_some() {
         crate::app::with_core(|c| c.forget_accounts_for_shot());

@@ -400,7 +400,15 @@ impl Core {
         }
     }
 
+    /// Tags say which of your addresses something is about; with only one, they say nothing.
+    fn tags_shown(&self) -> bool {
+        self.own_addresses().len() > 1
+    }
+
     fn account_tags(&self, addrs: &[String]) -> Vec<AccountTag> {
+        if !self.tags_shown() {
+            return Vec::new();
+        }
         addrs.iter().map(|a| AccountTag { label: self.addr_label(a).into(), color: self.addr_color(a), addr: a.as_str().into() }).collect()
     }
 
@@ -572,7 +580,20 @@ impl Core {
             .collect();
         let ui = self.ui();
         let app = ui.global::<App>();
-        app.set_accounts(ModelRc::new(VecModel::from(items)));
+        // Rows are updated in place: replacing the model would rebuild the account rows in
+        // Settings every second, closing popups and taking the focus from their fields.
+        let model = app.get_accounts();
+        match model.as_any().downcast_ref::<VecModel<AccountItem>>() {
+            Some(m) if m.row_count() == items.len() => {
+                for (i, it) in items.into_iter().enumerate() {
+                    if m.row_data(i).as_ref() != Some(&it) {
+                        m.set_row_data(i, it);
+                    }
+                }
+            }
+            Some(m) => m.set_vec(items),
+            None => app.set_accounts(ModelRc::new(VecModel::from(items))),
+        }
         app.set_syncing(busy);
         app.set_sync_text(text.into());
     }
@@ -781,6 +802,8 @@ impl Core {
                 // Between own addresses, say which way it went.
                 let to: Vec<&str> = m.recipients.iter().map(|p| p.addr.as_str()).filter(|a| me.contains(&a.to_lowercase())).collect();
                 if to.is_empty() { String::new() } else { format!("{} → {}", m.from.addr, to.join(", ")) }
+            } else if !self.tags_shown() {
+                String::new()
             } else if m.outgoing {
                 format!("from {}", m.me_addr)
             } else {
