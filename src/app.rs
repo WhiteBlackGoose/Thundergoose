@@ -1441,6 +1441,8 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
     let html_tx = spawn_html_renderer(paths.db(), html_jobs.clone());
     let remote_senders = store.remote_image_senders();
 
+    // Matches thundergoose.desktop, so the desktop shows the right icon and name.
+    let _ = slint::set_xdg_app_id("thundergoose");
     let ui = AppWindow::new()?;
     let app = ui.global::<App>();
     app.set_version(env!("CARGO_PKG_VERSION").into());
