@@ -107,6 +107,8 @@ jobs:
           cargo build --release --locked --target x86_64-apple-darwin
       - name: App bundle and disk image
         run: |
+          set -eE
+          trap 'echo "::error title=macOS bundle::line $LINENO failed: $BASH_COMMAND"' ERR
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="thundergoose") | .version')
           app=dist/Thundergoose.app
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
