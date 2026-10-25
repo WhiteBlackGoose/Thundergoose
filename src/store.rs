@@ -312,7 +312,7 @@ impl Store {
             let r = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?;
             r.flatten().collect()
         };
-        self.conn.execute_batch("BEGIN")?;
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
         for (id, msgid, from_addr, from_name, recipients, me_addr) in rows {
             let to: Vec<Person> = serde_json::from_str(&recipients).unwrap_or_default();
             let h = Header { msgid, date: 0, from: Person { name: from_name, addr: from_addr }, to, cc: Vec::new(), subject: String::new(), in_reply_to: String::new(), size: 0, seen: false };
@@ -405,15 +405,14 @@ impl Store {
             rows.flatten().collect()
         };
         for chunk in ids.chunks(200) {
-            self.conn.execute_batch("BEGIN")?;
-            for &id in chunk {
-                if let Some(raw) = self.raw(id) {
-                    let body = crate::parse::body(&raw);
-                    self.conn.execute(
-                        "UPDATE mails SET text=?2, quoted=?3, has_html=?4, attachments=?5, refs=?6, snippet=?7, rich=?8 WHERE id=?1",
-                        params![id, body.text, body.quoted, body.has_html, serde_json::to_string(&body.attachments).unwrap_or_default(), body.refs, body.snippet, body.rich],
-                    )?;
-                }
+            // Parse first, then write quickly: the sync threads write to the same database.
+            let bodies: Vec<(i64, Body)> = chunk.iter().filter_map(|&id| Some((id, crate::parse::body(&self.raw(id)?)))).collect();
+            self.conn.execute_batch("BEGIN IMMEDIATE")?;
+            for (id, body) in &bodies {
+                self.conn.execute(
+                    "UPDATE mails SET text=?2, quoted=?3, has_html=?4, attachments=?5, refs=?6, snippet=?7, rich=?8 WHERE id=?1",
+                    params![id, body.text, body.quoted, body.has_html, serde_json::to_string(&body.attachments).unwrap_or_default(), body.refs, body.snippet, body.rich],
+                )?;
             }
             self.conn.execute_batch("COMMIT")?;
         }
@@ -506,7 +505,7 @@ impl Store {
     }
 
     pub fn import_names(&self, names: &HashMap<String, String>) {
-        let _ = self.conn.execute_batch("BEGIN");
+        let _ = self.conn.execute_batch("BEGIN IMMEDIATE");
         for (addr, name) in names {
             let _ = self.conn.execute(
                 "INSERT INTO names(addr, name, prio) VALUES(?1, ?2, 3) ON CONFLICT(addr) DO UPDATE SET name=?2, prio=3",

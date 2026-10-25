@@ -424,7 +424,7 @@ impl Worker {
         let now = chrono::Utc::now().timestamp();
         let mut fresh = Vec::new();
         let mut added = Vec::new();
-        let _ = self.store.conn.execute_batch("BEGIN");
+        let _ = self.store.conn.execute_batch("BEGIN IMMEDIATE");
         for f in fetches.iter() {
             let (Some(uid), Some(h)) = (f.uid, crate::parse::header_from_fetch(f)) else { continue };
             let p = store::place(&h, &me, &self.acct.email);
