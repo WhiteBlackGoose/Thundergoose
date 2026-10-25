@@ -51,7 +51,10 @@ from and which one gets it; the bubbles show the way it went.</td>
 
 - **Which address, at a glance.** Every chat carries a colored tag for the address(es) of yours
   that contact writes to ("● work", "● gmail", in the colors of the account chips), and every
-  message says *to* or *from* which of your addresses it went.
+  message says *to* or *from* which of your addresses it went. Name the tags and pick their
+  colors (16 to choose from) in *Settings → Accounts*.
+- **Unread filter.** The *Unread* chip narrows any tab (Chats, Muted, Ignored, Spam) to
+  conversations with unread mail.
 - **Favorites, Muted, Ignored, Spam, one click away.** Hover a chat in the list for ☆ / 🔔 / ⊘ /
   🛡 quick buttons, or use the chat header or the right-click menu. *Yourself* is pinned on top. Favorites are pinned on top; the rest
   is sorted by newest message. *Muted* chats move to their own tab and still count unread mail

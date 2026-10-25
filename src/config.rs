@@ -46,10 +46,23 @@ pub struct Account {
     pub auth: Auth,
     /// Upload sent mail to the Sent folder ourselves (Gmail and Office 365 do it server-side).
     pub save_sent: bool,
+    /// The user's name for the account's tags and chips; the domain when unset.
+    #[serde(default)]
+    pub tag: Option<String>,
+    /// Index into the tag palette; derived from the address when unset.
+    #[serde(default)]
+    pub tag_color: Option<usize>,
 }
 
 impl Account {
     pub fn short_label(&self) -> String {
+        if let Some(tag) = self.tag.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+            return tag.to_string();
+        }
+        self.default_label()
+    }
+
+    pub fn default_label(&self) -> String {
         let domain = self.email.rsplit('@').next().unwrap_or(&self.email);
         domain.split('.').next().unwrap_or(domain).to_string()
     }

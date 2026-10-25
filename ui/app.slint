@@ -303,6 +303,14 @@ component Sidebar inherits Rectangle {
                 x: 12px;
                 spacing: 6px;
                 Chip {
+                    text: @tr("Unread");
+                    icon: Icons.mail;
+                    active: App.unread-only;
+                    tip: @tr("Only conversations with unread mail, in every tab");
+                    clicked => { App.set-unread-only(!App.unread-only); }
+                }
+                Rectangle { width: 1px; height: 18px; y: 4px; background: Theme.border; }
+                Chip {
                     text: @tr("All");
                     active: App.account-filter == -1;
                     clicked => { App.filter(-1); }
@@ -337,7 +345,7 @@ component Sidebar inherits Rectangle {
             padding: 24px;
             spacing: 6px;
             Text {
-                text: App.search != "" ? @tr("Nothing found") : App.tab == 1 ? @tr("No muted conversations. Use the bell on a chat to mute it.") : App.tab == 2 ? @tr("Nobody ignored. Use the ⊘ button on a chat to ignore it.") : App.tab == 3 ? @tr("No spam. Conversations from your Junk folders land here, and so do chats you mark as spam.") : App.accounts.length == 0 ? @tr("Add an account in Settings to get started") : App.syncing ? @tr("Fetching your mail…") : @tr("No conversations yet");
+                text: App.search != "" ? @tr("Nothing found") : App.unread-only ? @tr("Nothing unread here") : App.tab == 1 ? @tr("No muted conversations. Use the bell on a chat to mute it.") : App.tab == 2 ? @tr("Nobody ignored. Use the ⊘ button on a chat to ignore it.") : App.tab == 3 ? @tr("No spam. Conversations from your Junk folders land here, and so do chats you mark as spam.") : App.accounts.length == 0 ? @tr("Add an account in Settings to get started") : App.syncing ? @tr("Fetching your mail…") : @tr("No conversations yet");
                 wrap: word-wrap;
                 color: Theme.text-muted;
                 font-size: Theme.font-md;
@@ -1225,6 +1233,63 @@ component EmptyState inherits Rectangle {
     }
 }
 
+/// The colors an account's tags can have.
+component TagColorPicker inherits Rectangle {
+    in property <AccountItem> acct;
+    width: 26px;
+    height: 26px;
+    border-radius: 13px;
+    background: root.acct.hue;
+    border-width: 2px;
+    border-color: ta.has-hover ? Theme.text-muted : Theme.border;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { popup.show(); }
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 6px;
+        width: 8 * 30px + 20px;
+        height: 2 * 30px + 54px;
+        Card {
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                Rectangle {
+                    width: 8 * 30px;
+                    height: 2 * 30px;
+                    for c[i] in App.tag-colors: Rectangle {
+                        x: mod(i, 8) * 30px + 2px;
+                        y: floor(i / 8) * 30px + 2px;
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: c;
+                        border-width: root.acct.tag-color == i ? 3px : 0px;
+                        border-color: Theme.surface;
+                        Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 15px;
+                            border-width: root.acct.tag-color == i ? 2px : 0px;
+                            border-color: c;
+                        }
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { App.set-account-color(root.acct.id, i); }
+                        }
+                    }
+                }
+                LinkText {
+                    text: @tr("Automatic color");
+                    subtle: root.acct.tag-color != -1;
+                    clicked => { App.set-account-color(root.acct.id, -1); }
+                }
+            }
+        }
+    }
+}
+
 component AccountRow inherits Rectangle {
     in property <AccountItem> acct;
     property <string> pw;
@@ -1293,6 +1358,30 @@ component AccountRow inherits Rectangle {
                     App.remove-account(root.acct.id);
                 }
             }
+        }
+        // How chats and messages refer to this account.
+        HorizontalLayout {
+            spacing: 8px;
+            padding-left: 19px;
+            TagColorPicker {
+                acct: root.acct;
+                y: (parent.height - self.height) / 2;
+            }
+            Field {
+                width: 220px;
+                height: 32px;
+                text: root.acct.tag == root.acct.default-tag ? "" : root.acct.tag;
+                placeholder: @tr("Tag name (default: {})", root.acct.default-tag);
+                clearable: false;
+                font-size: Theme.font;
+                edited(t) => { App.set-account-tag(root.acct.id, t); }
+            }
+            AccountBadge {
+                y: (parent.height - self.height) / 2;
+                tag: { label: root.acct.tag, color: root.acct.hue, addr: root.acct.email };
+                font-size: 11.5px;
+            }
+            Rectangle { horizontal-stretch: 1; }
         }
         if !root.acct.oauth && (root.acct.needs-login || root.change-pw): HorizontalLayout {
             spacing: 8px;

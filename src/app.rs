@@ -140,6 +140,24 @@ fn tab_for(f: Flags, junk: bool) -> i32 {
     }
 }
 
+/// Colors offered for account tags.
+const TAG_COLORS: [(u8, u8, u8); 16] = [
+    (0x7c, 0x5c, 0xff), (0x4f, 0x46, 0xe5), (0x25, 0x63, 0xeb), (0x0e, 0xa5, 0xe9),
+    (0x06, 0xb6, 0xd4), (0x0d, 0x94, 0x88), (0x16, 0xa3, 0x4a), (0x65, 0xa3, 0x0d),
+    (0xca, 0x8a, 0x04), (0xd9, 0x77, 0x06), (0xea, 0x58, 0x0c), (0xdc, 0x26, 0x26),
+    (0xe1, 0x1d, 0x48), (0xdb, 0x27, 0x77), (0xc0, 0x26, 0xd3), (0x64, 0x74, 0x8b),
+];
+
+fn tag_color(i: usize) -> slint::Color {
+    let (r, g, b) = TAG_COLORS[i % TAG_COLORS.len()];
+    slint::Color::from_rgb_u8(r, g, b)
+}
+
+/// The color of an account's tags and chips: the user's pick, or one derived from the address.
+fn account_color(a: &Account) -> slint::Color {
+    a.tag_color.map(tag_color).unwrap_or_else(|| hue(&a.id))
+}
+
 fn hue(key: &str) -> slint::Color {
     let h = key.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
     let (r, g, b) = HUES[(h % HUES.len() as u32) as usize];
@@ -241,6 +259,8 @@ pub struct Core {
     names: HashMap<String, String>,
 
     filter: Option<usize>,
+    /// Only conversations with unread mail, in whichever tab.
+    unread_only: bool,
     search: String,
     peers: Vec<PeerRow>,
     /// Synthetic "write to <address>" entry at the top of the list.
@@ -364,6 +384,9 @@ impl Core {
     /// Short name of one of the own addresses, as on the account chips ("work", "gmail"); the
     /// local part when two own addresses share a domain.
     fn addr_label(&self, addr: &str) -> String {
+        if let Some(tag) = self.account_index_for(addr).and_then(|i| self.accounts[i].tag.as_deref()).map(str::trim).filter(|t| !t.is_empty()) {
+            return tag.to_string();
+        }
         let domain_label = |a: &str| a.rsplit('@').next().unwrap_or(a).split('.').next().unwrap_or(a).to_lowercase();
         let label = domain_label(addr);
         let shared = self.own_addresses().iter().filter(|(_, a)| domain_label(a) == label).count() > 1;
@@ -372,7 +395,7 @@ impl Core {
 
     fn addr_color(&self, addr: &str) -> slint::Color {
         match self.account_index_for(addr) {
-            Some(i) => hue(&self.accounts[i].id),
+            Some(i) => account_color(&self.accounts[i]),
             None => hue(addr),
         }
     }
@@ -412,6 +435,10 @@ impl Core {
         self.suggest = None;
         if q.is_empty() {
             rows.retain(|r| tab_of(r) == self.tab);
+            if self.unread_only {
+                // The open conversation stays while you read it.
+                rows.retain(|r| r.unread > 0 || self.selected.as_deref() == Some(r.peer.as_str()));
+            }
         } else {
             // Search looks through every tab.
             let text_hits = if q.chars().count() >= 3 { self.store.peers_matching(&q) } else { HashSet::new() };
@@ -531,7 +558,10 @@ impl Core {
                     id: a.id.as_str().into(),
                     email: a.email.as_str().into(),
                     label: a.short_label().into(),
-                    hue: hue(&a.id),
+                    hue: account_color(a),
+                    tag: a.short_label().into(),
+                    default_tag: a.default_label().into(),
+                    tag_color: a.tag_color.map_or(-1, |i| i as i32),
                     online: st.online,
                     busy: st.busy,
                     needs_login: st.needs_login,
@@ -1177,6 +1207,15 @@ impl Core {
         });
     }
 
+    fn account_tags_changed(&mut self) {
+        self.save_accounts();
+        self.refresh_status();
+        self.refresh_peers();
+        if self.selected.is_some() {
+            self.load_conversation(false);
+        }
+    }
+
     fn save_accounts(&self) {
         if let Err(e) = save_json(&self.paths.accounts(), &self.accounts, false) {
             eprintln!("cannot save accounts: {e}");
@@ -1185,7 +1224,9 @@ impl Core {
 
     fn add_account(&mut self, acct: Account) {
         if let Some(existing) = self.accounts.iter_mut().find(|a| a.id == acct.id) {
-            *existing = acct.clone();
+            // A re-import keeps what the user chose for the tags.
+            let (tag, color) = (existing.tag.clone(), existing.tag_color);
+            *existing = Account { tag: acct.tag.clone().or(tag), tag_color: acct.tag_color.or(color), ..acct.clone() };
             if let Some(w) = self.workers.get(&acct.id) {
                 let _ = w.send(Cmd::Reconnect);
             }
@@ -1258,7 +1299,7 @@ impl Core {
         }
         let save_sent = crate::config::issuer_for_host(&imap.host).is_none();
         let name = app.get_add_name().trim().to_string();
-        Ok((Account { id: email.clone(), email, name, aliases: Vec::new(), imap, smtp, auth, save_sent }, password))
+        Ok((Account { id: email.clone(), email, name, aliases: Vec::new(), imap, smtp, auth, save_sent, tag: None, tag_color: None }, password))
     }
 
     fn add_status(&self, text: impl Into<String>, error: bool, busy: bool) {
@@ -1446,6 +1487,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
     let ui = AppWindow::new()?;
     let app = ui.global::<App>();
     app.set_version(env!("CARGO_PKG_VERSION").into());
+    app.set_tag_colors(ModelRc::new(VecModel::from((0..TAG_COLORS.len()).map(tag_color).collect::<Vec<_>>())));
     app.set_notify_desktop(settings.notify_desktop);
     app.set_notify_sound(settings.notify_sound);
     app.set_profile_path(profile.as_ref().map(|p| p.display().to_string()).unwrap_or_default().into());
@@ -1468,6 +1510,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         store,
         names: HashMap::new(),
         filter: None,
+        unread_only: false,
         search: String::new(),
         peers: Vec::new(),
         suggest: None,
@@ -1557,6 +1600,13 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
             if let Some(key) = key {
                 c.open_peer(key);
             }
+        })
+    });
+    app.on_set_unread_only(|on| {
+        with_core(|c| {
+            c.unread_only = on;
+            c.ui().global::<App>().set_unread_only(on);
+            c.refresh_peers();
         })
     });
     app.on_filter(|i| {
@@ -1978,6 +2028,21 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         })
     });
     app.on_remove_account(|id| with_core(|c| c.remove_account(&id)));
+    app.on_set_account_tag(|id, tag| {
+        with_core(|c| {
+            let Some(a) = c.accounts.iter_mut().find(|a| a.id == id.as_str()) else { return };
+            let tag = tag.trim().to_string();
+            a.tag = (!tag.is_empty()).then_some(tag);
+            c.account_tags_changed();
+        })
+    });
+    app.on_set_account_color(|id, i| {
+        with_core(|c| {
+            let Some(a) = c.accounts.iter_mut().find(|a| a.id == id.as_str()) else { return };
+            a.tag_color = (i >= 0).then_some(i as usize);
+            c.account_tags_changed();
+        })
+    });
     app.on_appearance_changed(|| {
         with_core(|c| {
             let ui = c.ui();

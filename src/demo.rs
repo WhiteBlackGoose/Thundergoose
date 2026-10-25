@@ -171,7 +171,7 @@ fn person(i: usize) -> Person {
 
 fn account(name: &str, email: &str) -> Account {
     let server = |host: &str, port| Server { host: host.into(), port, security: Security::Tls, username: email.into() };
-    Account { id: email.into(), email: email.into(), name: name.into(), aliases: Vec::new(), imap: server("imap.example", 993), smtp: server("smtp.example", 465), auth: Auth::Password, save_sent: false }
+    Account { id: email.into(), email: email.into(), name: name.into(), aliases: Vec::new(), imap: server("imap.example", 993), smtp: server("smtp.example", 465), auth: Auth::Password, save_sent: false, tag: None, tag_color: None }
 }
 
 /// A small, valid one-page PDF.
@@ -306,7 +306,11 @@ pub fn prepare() {
     }
     std::env::set_var("THUNDERGOOSE_HOME", &dir);
     let paths = Paths::new();
-    let accounts = vec![account("Sam Rivera", PEOPLE[ME].1), account("Sam Rivera", PEOPLE[WORK].1)];
+    let mut accounts = vec![account("Sam Rivera", PEOPLE[ME].1), account("Sam Rivera", PEOPLE[WORK].1)];
+    // Tags named and colored by the user.
+    accounts[0].tag = Some("personal".into());
+    accounts[0].tag_color = Some(0);
+    accounts[1].tag_color = Some(10);
     let _ = save_json(&paths.accounts(), &accounts, false);
     let _ = save_json(&paths.settings(), &Settings::default(), false);
     if let Err(e) = seed(&paths, &accounts) {

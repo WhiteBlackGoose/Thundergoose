@@ -101,6 +101,11 @@ export struct AccountItem {
     needs-login: bool,
     oauth: bool,
     message: string,
+    /// Name on the account's tags; `default-tag` when the user hasn't named it.
+    tag: string,
+    default-tag: string,
+    /// Index into `App.tag-colors`, or -1 for the automatic color.
+    tag-color: int,
 }
 
 export struct Participant {
@@ -115,6 +120,7 @@ export global App {
     in-out property <string> search;
     in property <[AccountItem]> accounts;
     in-out property <int> account-filter: -1;
+    in property <bool> unread-only;
     in property <int> total-unread;
     in property <bool> syncing;
     in-out property <int> tab;
@@ -173,6 +179,7 @@ export global App {
     in-out property <bool> notify-desktop;
     in-out property <bool> notify-sound;
     in-out property <bool> show-favicons: true;
+    in property <[color]> tag-colors;
     /// Index into the interface sizes 80, 90, 100, 110, 125, 150 %.
     in-out property <int> ui-scale: 2;
 
@@ -202,6 +209,7 @@ export global App {
     callback search-edited(string);
     callback search-accepted();
     callback filter(int);
+    callback set-unread-only(bool);
     callback load-earlier();
     callback toggle-message(int);
     callback open-html(int);
@@ -244,4 +252,7 @@ export global App {
     callback add-detect();
     callback add-submit();
     callback remove-account(string);
+    callback set-account-tag(string, string);
+    /// Account id and palette index (-1: automatic).
+    callback set-account-color(string, int);
 }

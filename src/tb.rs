@@ -283,7 +283,7 @@ pub fn import(profile: &Path, primary_password: &str) -> Result<Import, String> 
             }
         }
         let save_sent = issuer_for_host(&imap.host).is_none();
-        accounts.push(Account { id: email.clone(), email, name, aliases, imap, smtp, auth, save_sent });
+        accounts.push(Account { id: email.clone(), email, name, aliases, imap, smtp, auth, save_sent, tag: None, tag_color: None });
     }
     Ok(Import { accounts, secrets, warnings })
 }
