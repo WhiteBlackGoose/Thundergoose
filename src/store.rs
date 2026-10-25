@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS folders(
     PRIMARY KEY(account, name)
 );
 CREATE TABLE IF NOT EXISTS names(addr TEXT PRIMARY KEY, name TEXT NOT NULL, prio INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS junk_folders(account TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(account, name));
 CREATE TABLE IF NOT EXISTS contacts(
     key TEXT PRIMARY KEY,
     favorite INTEGER NOT NULL DEFAULT 0,
@@ -62,6 +63,8 @@ pub struct Flags {
     pub favorite: bool,
     pub muted: bool,
     pub ignored: bool,
+    /// 1 marked as spam, -1 marked as not spam, 0 up to the Junk folders.
+    pub spam: i32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -70,6 +73,13 @@ pub enum Flag {
     Muted,
     Ignored,
 }
+
+/// Columns added after the first release, as (table, column, declaration).
+const ADDED_COLUMNS: &[(&str, &str, &str)] = &[("mails", "junk", "INTEGER NOT NULL DEFAULT 0"), ("contacts", "spam", "INTEGER NOT NULL DEFAULT 0")];
+
+/// SQL value: whether mail `m` lives only in Junk folders.
+const JUNK_EXPR: &str = "(EXISTS(SELECT 1 FROM locs l JOIN junk_folders j ON j.account=l.account AND j.name=l.folder WHERE l.mail=m.id)
+    AND NOT EXISTS(SELECT 1 FROM locs l WHERE l.mail=m.id AND NOT EXISTS(SELECT 1 FROM junk_folders j WHERE j.account=l.account AND j.name=l.folder)))";
 
 /// SQL condition selecting the mail shown in a conversation (`?1` is the key). A one-person
 /// conversation also shows the group mail that person took part in.
@@ -88,6 +98,12 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let c = Connection::open(path)?;
     c.busy_timeout(std::time::Duration::from_secs(10))?;
     c.execute_batch(SCHEMA)?;
+    for (table, column, decl) in ADDED_COLUMNS {
+        let exists: bool = c.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name=?1"), [column], |r| r.get::<_, i64>(0)).map(|n| n > 0)?;
+        if !exists {
+            c.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
+        }
+    }
     Ok(c)
 }
 
@@ -165,6 +181,10 @@ pub struct PeerRow {
     pub snippet: String,
     pub outgoing: bool,
     pub unread: i64,
+    /// All of the conversation's mail is in Junk folders.
+    pub junk: bool,
+    /// Own addresses the conversation uses, most recent first.
+    pub me_addrs: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -189,6 +209,8 @@ pub struct MailRow {
     pub peer: String,
     /// To and Cc.
     pub recipients: Vec<Person>,
+    /// Only in Junk folders.
+    pub junk: bool,
 }
 
 impl Store {
@@ -305,8 +327,8 @@ impl Store {
     }
 
     pub fn flags(&self) -> HashMap<String, Flags> {
-        let Ok(mut stmt) = self.conn.prepare("SELECT key, favorite, muted, ignored FROM contacts") else { return HashMap::new() };
-        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, Flags { favorite: r.get(1)?, muted: r.get(2)?, ignored: r.get(3)? })))
+        let Ok(mut stmt) = self.conn.prepare("SELECT key, favorite, muted, ignored, spam FROM contacts") else { return HashMap::new() };
+        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, Flags { favorite: r.get(1)?, muted: r.get(2)?, ignored: r.get(3)?, spam: r.get(4)? })))
             .map(|rows| rows.flatten().collect())
             .unwrap_or_default()
     }
@@ -318,6 +340,15 @@ impl Store {
             Flag::Ignored => "ignored",
         };
         let _ = self.conn.execute(&format!("INSERT INTO contacts(key, {col}) VALUES(?1, ?2) ON CONFLICT(key) DO UPDATE SET {col}=?2"), params![key, on]);
+    }
+
+    pub fn set_spam(&self, key: &str, value: i32) {
+        let _ = self.conn.execute("INSERT INTO contacts(key, spam) VALUES(?1, ?2) ON CONFLICT(key) DO UPDATE SET spam=?2", params![key, value]);
+    }
+
+    /// Whether a mail lives only in Junk folders.
+    pub fn is_junk(&self, id: i64) -> bool {
+        self.conn.query_row("SELECT junk FROM mails WHERE id=?1", [id], |r| r.get(0)).unwrap_or(false)
     }
 
     pub fn mail_brief(&self, id: i64) -> Option<(String, String, String, String, bool, bool)> {
@@ -393,11 +424,36 @@ impl Store {
     }
 
     pub fn remove_uids(&self, account: &str, folder: &str, uids: &[u32]) {
+        let mut ids = Vec::new();
         for uid in uids {
+            if let Ok(Some(id)) = self.conn.query_row("SELECT mail FROM locs WHERE account=?1 AND folder=?2 AND uid=?3", params![account, folder, uid], |r| r.get::<_, i64>(0)).optional() {
+                ids.push(id);
+            }
             let _ = self.conn.execute("DELETE FROM locs WHERE account=?1 AND folder=?2 AND uid=?3", params![account, folder, uid]);
         }
         if !uids.is_empty() {
+            // Moved out of (or into) Junk elsewhere: the remaining copies decide.
+            for id in ids {
+                let _ = self.conn.execute(&format!("UPDATE mails AS m SET junk = {JUNK_EXPR} WHERE m.id=?1"), [id]);
+            }
             self.drop_orphans();
+        }
+    }
+
+    /// Remembers which folders of an account are Junk folders.
+    pub fn set_junk_folders(&self, account: &str, names: &[String]) {
+        let _ = self.conn.execute("DELETE FROM junk_folders WHERE account=?1", [account]);
+        for n in names {
+            let _ = self.conn.execute("INSERT OR IGNORE INTO junk_folders(account, name) VALUES(?1, ?2)", params![account, n]);
+        }
+        let _ = self.conn.execute(&format!("UPDATE mails AS m SET junk = {JUNK_EXPR} WHERE m.id IN (SELECT mail FROM locs WHERE account=?1)"), [account]);
+    }
+
+    /// Recomputes the Junk state of these mails.
+    pub fn refresh_junk(&self, ids: &[i64]) {
+        let Ok(mut stmt) = self.conn.prepare(&format!("UPDATE mails AS m SET junk = {JUNK_EXPR} WHERE m.id=?1")) else { return };
+        for id in ids {
+            let _ = stmt.execute([id]);
         }
     }
 
@@ -445,12 +501,19 @@ impl Store {
     /// One row per conversation, newest first. With `account`, only mail of that account counts.
     pub fn peers(&self, account: Option<&str>) -> Vec<PeerRow> {
         let sql = format!(
-            "SELECT peer, MAX(date), snippet, outgoing, SUM(seen = 0 AND outgoing = 0) FROM mails {} GROUP BY peer ORDER BY 2 DESC",
+            "SELECT peer, MAX(date), snippet, outgoing, SUM(seen = 0 AND outgoing = 0), SUM(junk) = COUNT(*), GROUP_CONCAT(me_addr, ' ')
+             FROM (SELECT peer, date, snippet, outgoing, seen, junk, me_addr, account FROM mails ORDER BY date DESC) {} GROUP BY peer ORDER BY 2 DESC",
             if account.is_some() { "WHERE account = ?1" } else { "" }
         );
         let Ok(mut stmt) = self.conn.prepare(&sql) else { return Vec::new() };
         let map = |r: &rusqlite::Row| {
-            Ok(PeerRow { peer: r.get(0)?, last_date: r.get(1)?, snippet: r.get(2)?, outgoing: r.get(3)?, unread: r.get(4)? })
+            let mut me_addrs: Vec<String> = Vec::new();
+            for a in r.get::<_, String>(6)?.split(' ') {
+                if !a.is_empty() && !me_addrs.iter().any(|x| x == a) {
+                    me_addrs.push(a.to_string());
+                }
+            }
+            Ok(PeerRow { peer: r.get(0)?, last_date: r.get(1)?, snippet: r.get(2)?, outgoing: r.get(3)?, unread: r.get(4)?, junk: r.get(5)?, me_addrs })
         };
         let rows = match account {
             Some(a) => stmt.query_map([a], map),
@@ -472,7 +535,7 @@ impl Store {
         let filter = conversation_filter(peer);
         let total: i64 = self.conn.query_row(&format!("SELECT COUNT(*) FROM mails WHERE {filter}"), [peer], |r| r.get(0)).unwrap_or(0);
         let Ok(mut stmt) = self.conn.prepare(&format!(
-            "SELECT id, msgid, date, from_addr, from_name, subject, outgoing, seen, account, me_addr, has_body, text, quoted, has_html, attachments, refs, in_reply_to, peer, recipients
+            "SELECT id, msgid, date, from_addr, from_name, subject, outgoing, seen, account, me_addr, has_body, text, quoted, has_html, attachments, refs, in_reply_to, peer, recipients, junk
              FROM mails WHERE {filter} ORDER BY date DESC LIMIT ?2"
         )) else {
             return (Vec::new(), total);
@@ -498,6 +561,7 @@ impl Store {
                     in_reply_to: r.get(16)?,
                     peer: r.get(17)?,
                     recipients: serde_json::from_str(&r.get::<_, String>(18)?).unwrap_or_default(),
+                    junk: r.get(19)?,
                 })
             })
             .map(|rows| rows.flatten().collect::<Vec<_>>())

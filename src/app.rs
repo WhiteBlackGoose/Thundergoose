@@ -18,7 +18,7 @@ use crate::config::{Issuer, Security, Server};
 use crate::favicon::Favicons;
 use crate::store::{Flag, Flags, MailRow, PeerRow, Person, Placement, Store};
 use crate::sync::{self, Cmd, Shared};
-use crate::{AccountItem, App, AppWindow, AttachmentItem, MessageItem, Palette, Participant, PeerItem, Theme};
+use crate::{AccountItem, AccountTag, App, AppWindow, AttachmentItem, MessageItem, Palette, Participant, PeerItem, Theme};
 
 const PAGE: usize = 60;
 const MAX_INLINE_TEXT: usize = 6000;
@@ -80,6 +80,22 @@ const HUES: [(u8, u8, u8); 10] = [
     (0xc2, 0x41, 0x0c),
     (0xdb, 0x27, 0x77),
 ];
+
+/// Sidebar tab of a conversation: 0 Chats, 1 Muted, 2 Ignored, 3 Spam. `junk`: all its mail is
+/// in Junk folders. Your own choices win over the server's spam filter.
+fn tab_for(f: Flags, junk: bool) -> i32 {
+    if f.ignored {
+        2
+    } else if f.spam == 1 {
+        3
+    } else if f.muted {
+        1
+    } else if junk && f.spam != -1 {
+        3
+    } else {
+        0
+    }
+}
 
 fn hue(key: &str) -> slint::Color {
     let h = key.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
@@ -285,6 +301,26 @@ impl Core {
 
     // ---------------------------------------------------------------- sidebar
 
+    /// Short name of one of the own addresses, as on the account chips ("work", "gmail"); the
+    /// local part when two own addresses share a domain.
+    fn addr_label(&self, addr: &str) -> String {
+        let domain_label = |a: &str| a.rsplit('@').next().unwrap_or(a).split('.').next().unwrap_or(a).to_lowercase();
+        let label = domain_label(addr);
+        let shared = self.own_addresses().iter().filter(|(_, a)| domain_label(a) == label).count() > 1;
+        if shared { addr.split('@').next().unwrap_or(addr).to_string() } else { label }
+    }
+
+    fn addr_color(&self, addr: &str) -> slint::Color {
+        match self.account_index_for(addr) {
+            Some(i) => hue(&self.accounts[i].id),
+            None => hue(addr),
+        }
+    }
+
+    fn account_tags(&self, addrs: &[String]) -> Vec<AccountTag> {
+        addrs.iter().map(|a| AccountTag { label: self.addr_label(a).into(), color: self.addr_color(a), addr: a.as_str().into() }).collect()
+    }
+
     /// All own addresses with the account each belongs to.
     fn own_addresses(&self) -> Vec<(usize, String)> {
         self.accounts.iter().enumerate().flat_map(|(i, a)| a.addresses().map(move |x| (i, x.clone()))).collect()
@@ -296,34 +332,26 @@ impl Core {
         let mut rows = self.store.peers(account.as_deref());
         // "Yourself" is always there, even before the first note.
         if !self.accounts.is_empty() && !rows.iter().any(|r| r.peer.is_empty()) {
-            rows.push(PeerRow { peer: String::new(), last_date: 0, snippet: "Notes and files for yourself".into(), outgoing: false, unread: 0 });
+            rows.push(PeerRow { peer: String::new(), last_date: 0, snippet: "Notes and files for yourself".into(), outgoing: false, unread: 0, junk: false, me_addrs: Vec::new() });
         }
         let flag = |k: &str| self.flags.get(k).copied().unwrap_or_default();
-        let tab_of = |k: &str| {
-            let f = flag(k);
-            if f.ignored {
-                2
-            } else if f.muted {
-                1
-            } else {
-                0
-            }
-        };
-        let (mut main_unread, mut muted_unread, mut muted_count, mut ignored_count) = (0i64, 0i64, 0i32, 0i32);
+        let tab_of = |r: &PeerRow| tab_for(flag(&r.peer), r.junk);
+        let (mut main_unread, mut muted_unread, mut muted_count, mut ignored_count, mut spam_count) = (0i64, 0i64, 0i32, 0i32, 0i32);
         for r in &rows {
-            match tab_of(&r.peer) {
+            match tab_of(r) {
                 0 => main_unread += r.unread,
                 1 => {
                     muted_unread += r.unread;
                     muted_count += 1;
                 }
-                _ => ignored_count += 1,
+                2 => ignored_count += 1,
+                _ => spam_count += 1,
             }
         }
         let q = self.search.trim().to_lowercase();
         self.suggest = None;
         if q.is_empty() {
-            rows.retain(|r| tab_of(&r.peer) == self.tab);
+            rows.retain(|r| tab_of(r) == self.tab);
         } else {
             // Search looks through every tab.
             let text_hits = if q.chars().count() >= 3 { self.store.peers_matching(&q) } else { HashSet::new() };
@@ -338,12 +366,14 @@ impl Core {
         }
         // Favorites are pinned on top; both parts stay newest first.
         rows.sort_by_key(|r| !flag(&r.peer).favorite);
-        if let Some(i) = rows.iter().position(|r| r.peer.is_empty() && r.last_date == 0) {
-            let row = rows.remove(i);
-            let first_other = rows.iter().position(|r| !flag(&r.peer).favorite).unwrap_or(rows.len());
-            rows.insert(first_other, row);
+        // "Yourself" is pinned to the very top, above the favorites.
+        if q.is_empty() {
+            if let Some(i) = rows.iter().position(|r| r.peer.is_empty()) {
+                let row = rows.remove(i);
+                rows.insert(0, row);
+            }
         }
-        let has_favorites = q.is_empty() && rows.first().is_some_and(|r| flag(&r.peer).favorite);
+        let has_favorites = q.is_empty() && rows.iter().any(|r| !r.peer.is_empty() && flag(&r.peer).favorite);
         let mut items: Vec<PeerItem> = Vec::with_capacity(rows.len() + 1);
         if let Some(key) = &self.suggest {
             items.push(PeerItem {
@@ -357,12 +387,17 @@ impl Core {
         let mut prev_fav = None;
         for r in &rows {
             let f = flag(&r.peer);
-            let section = if has_favorites && prev_fav != Some(f.favorite) {
+            let pinned = q.is_empty() && r.peer.is_empty();
+            let section = if pinned {
+                ""
+            } else if has_favorites && prev_fav != Some(f.favorite) {
                 if f.favorite { "Favorites" } else { "Chats" }
             } else {
                 ""
             };
-            prev_fav = Some(f.favorite);
+            if !pinned {
+                prev_fav = Some(f.favorite);
+            }
             let icon = icon_for(&mut self.icons, &self.favicons, self.settings.favicons, &r.peer);
             items.push(PeerItem {
                 key: r.peer.as_str().into(),
@@ -382,6 +417,10 @@ impl Core {
                 has_icon: icon.is_some(),
                 icon: icon.unwrap_or_default(),
                 me: r.peer.is_empty(),
+                spam: tab_of(r) == 3,
+                // Which of your addresses this contact writes to. For "Yourself" every
+                // address is involved, so that says nothing.
+                accounts: ModelRc::new(VecModel::from(if r.peer.is_empty() { Vec::new() } else { self.account_tags(&r.me_addrs[..r.me_addrs.len().min(2)]) })),
             });
         }
         self.peers = rows;
@@ -393,6 +432,7 @@ impl Core {
         app.set_muted_unread(muted_unread as i32);
         app.set_muted_count(muted_count);
         app.set_ignored_count(ignored_count);
+        app.set_spam_count(spam_count);
         app.set_tab(self.tab);
         self.sync_selection_index();
     }
@@ -563,6 +603,15 @@ impl Core {
         app.set_chat_favorite(f.favorite);
         app.set_chat_muted(f.muted);
         app.set_chat_ignored(f.ignored);
+        let junk = !self.mails.is_empty() && self.mails.iter().filter(|m| m.peer == key).all(|m| m.junk);
+        app.set_chat_spam(tab_for(f, junk) == 3);
+        let mut used: Vec<String> = Vec::new();
+        for m in self.mails.iter().rev() {
+            if !used.contains(&m.me_addr) {
+                used.push(m.me_addr.clone());
+            }
+        }
+        app.set_chat_accounts(ModelRc::new(VecModel::from(if key.is_empty() { Vec::new() } else { self.account_tags(&used) })));
         app.set_chat_subtitle(
             if key.is_empty() {
                 "Notes and mail between your own addresses".to_string()
@@ -579,8 +628,6 @@ impl Core {
         app.set_chat_people(ModelRc::new(VecModel::from(people)));
         app.set_has_earlier((self.mails.len() as i64) < total);
 
-        let mine: HashSet<&str> = self.mails.iter().map(|m| m.me_addr.as_str()).collect();
-        let show_via = mine.len() > 1;
         let me = self.me.read().unwrap().clone();
         let mut want_previews: Vec<PreviewKey> = Vec::new();
         let mut items = Vec::with_capacity(self.mails.len());
@@ -625,10 +672,10 @@ impl Core {
                 // Between own addresses, say which way it went.
                 let to: Vec<&str> = m.recipients.iter().map(|p| p.addr.as_str()).filter(|a| me.contains(&a.to_lowercase())).collect();
                 if to.is_empty() { String::new() } else { format!("{} → {}", m.from.addr, to.join(", ")) }
-            } else if show_via {
-                if m.outgoing { format!("from {}", m.me_addr) } else { format!("to {}", m.me_addr) }
+            } else if m.outgoing {
+                format!("from {}", m.me_addr)
             } else {
-                String::new()
+                format!("to {}", m.me_addr)
             };
             items.push(MessageItem {
                 id: m.id as i32,
@@ -644,6 +691,8 @@ impl Core {
                 full_time: Local.timestamp_opt(m.date, 0).single().map(|t| t.format("%A, %-d %B %Y, %H:%M").to_string()).unwrap_or_default().into(),
                 day: if new_day { day } else { String::new() }.into(),
                 via: via.into(),
+                via_color: self.addr_color(&m.me_addr),
+                junk: m.junk,
                 loading: !m.has_body,
                 has_html: m.has_html,
                 unread: !m.seen,
@@ -857,6 +906,11 @@ impl Core {
 
     // ---------------------------------------------------------- appearance
 
+    pub(crate) fn set_tab(&mut self, tab: i32) {
+        self.tab = tab;
+        self.refresh_peers();
+    }
+
     pub(crate) fn set_look(&mut self, theme: i32, accent: i32) {
         self.settings.theme = theme;
         self.settings.accent = accent;
@@ -893,7 +947,8 @@ impl Core {
                 continue;
             }
             let (chat, sender) = (flag(&peer), flag(&from_addr));
-            if chat.muted || chat.ignored || sender.ignored {
+            let junk = self.store.is_junk(id);
+            if chat.muted || chat.ignored || sender.ignored || chat.spam == 1 || (junk && chat.spam != -1) {
                 continue;
             }
             let who = self.name_of(&from_addr).cloned().filter(|n| !n.is_empty()).unwrap_or(if from_name.is_empty() { from_addr.clone() } else { from_name });
@@ -940,9 +995,30 @@ impl Core {
                 f.muted = !f.muted;
                 (Flag::Muted, f.muted, if f.muted { "Muted: no notifications, moved to the Muted tab" } else { "Unmuted" })
             }
-            _ => {
+            2 => {
                 f.ignored = !f.ignored;
                 (Flag::Ignored, f.ignored, if f.ignored { "Ignored: moved to the Ignored tab" } else { "No longer ignored" })
+            }
+            _ => {
+                let junk = self.peers.iter().find(|p| p.peer == key).is_some_and(|p| p.junk);
+                let now_spam = tab_for(*f, junk) == 3;
+                f.spam = if now_spam { -1 } else { 1 };
+                if !now_spam {
+                    f.muted = false;
+                    f.ignored = false;
+                }
+                let value = f.spam;
+                self.store.set_spam(&key, value);
+                if !now_spam {
+                    self.store.set_flag(&key, Flag::Muted, false);
+                    self.store.set_flag(&key, Flag::Ignored, false);
+                }
+                self.toast(format!("{}: {}", self.peer_title(&key), if now_spam { "Not spam, back in Chats" } else { "Marked as spam: moved to the Spam tab" }), false);
+                self.refresh_peers();
+                if self.selected.as_deref() == Some(key.as_str()) {
+                    self.load_conversation(false);
+                }
+                return;
             }
         };
         self.store.set_flag(&key, flag, on);
@@ -1530,12 +1606,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
             }
         })
     });
-    app.on_set_tab(|i| {
-        with_core(|c| {
-            c.tab = i;
-            c.refresh_peers();
-        })
-    });
+    app.on_set_tab(|i| with_core(|c| c.set_tab(i)));
     app.on_open_chat(|key| with_core(|c| c.open_peer(key.to_string())));
     app.on_toggle_flag(|i, which| {
         with_core(|c| {

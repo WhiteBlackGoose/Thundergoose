@@ -49,10 +49,15 @@ from and which one gets it; the bubbles show the way it went.</td>
 </tr>
 </table>
 
-- **Favorites, Muted, Ignored, one click away.** Hover a chat in the list for ☆ / 🔔 / ⊘ quick
-  buttons, or use the chat header or the right-click menu. Favorites are pinned on top; the rest
+- **Which address, at a glance.** Every chat carries a colored tag for the address(es) of yours
+  that contact writes to ("● work", "● gmail", in the colors of the account chips), and every
+  message says *to* or *from* which of your addresses it went.
+- **Favorites, Muted, Ignored, Spam, one click away.** Hover a chat in the list for ☆ / 🔔 / ⊘ /
+  🛡 quick buttons, or use the chat header or the right-click menu. *Yourself* is pinned on top. Favorites are pinned on top; the rest
   is sorted by newest message. *Muted* chats move to their own tab and still count unread mail
-  there, but never notify or play a sound. *Ignored* chats are silent and left out of every count.
+  there, but never notify or play a sound. *Ignored* chats are silent and left out of every count. *Spam* collects what your servers'
+  spam filters put in Junk (Junk folders are synced too, also on Gmail) plus chats you mark;
+  *Not spam* brings a chat back for good. Marking only changes Thundergoose, not the server.
 - **Website icons.** Contacts at companies and organisations get their site's icon, fetched once
   from their domain and cached. Addresses at Gmail, Outlook, GMX, Proton and about a hundred other
   mailbox providers keep their initials. Can be switched off in Settings.
@@ -82,7 +87,17 @@ from and which one gets it; the bubbles show the way it went.</td>
   chunks, with the newest bodies downloaded in between, so recent mail is readable within
   seconds. A restart shows your mail immediately and only fetches what changed.
 
-<p align="center"><img src="docs/settings-light.png" alt="Settings: accounts, notifications, appearance" width="80%"></p>
+<table>
+<tr>
+<td width="50%"><img src="docs/spam-light.png" alt="The Spam tab with mail from the Junk folder"></td>
+<td width="50%"><img src="docs/settings-light.png" alt="Settings: accounts, notifications, appearance"></td>
+</tr>
+<tr>
+<td><b>Spam tab.</b> Conversations whose mail sits only in a Junk folder land here, as do chats
+you mark as spam. They never notify.</td>
+<td><b>Settings.</b> Accounts, Thunderbird import, notifications, website icons, theme and accent.</td>
+</tr>
+</table>
 
 ## Try it
 

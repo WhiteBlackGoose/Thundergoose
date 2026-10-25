@@ -87,6 +87,9 @@ struct Folder {
     sent: bool,
 }
 
+/// Names of Junk folders on servers that don't mark them.
+const JUNK_NAMES: &[&str] = &["junk", "junk e-mail", "junk-e-mail", "junk email", "spam", "bulk mail", "spamverdacht", "unerwünscht"];
+
 const SKIP_NAMES: &[&str] = &[
     "trash", "deleted", "deleted items", "deleted messages", "bin", "papierkorb", "gelöschte elemente", "junk", "junk e-mail", "junk-e-mail", "junk email",
     "spam", "drafts", "entwürfe", "outbox", "postausgang", "calendar", "kalender", "contacts", "kontakte", "tasks", "aufgaben", "journal", "notes", "notizen",
@@ -120,12 +123,26 @@ fn utf7_imap(name: &str) -> String {
     out
 }
 
-fn choose_folders(s: &mut Imap) -> Result<Vec<Folder>, imap::Error> {
+/// The folders to sync, and which of them are Junk folders (synced last, for the Spam tab).
+fn choose_folders(s: &mut Imap) -> Result<(Vec<Folder>, Vec<String>), imap::Error> {
     let names = s.list(Some(""), Some("*"))?;
     let has = |n: &imap::types::Name<'_>, a: NameAttribute<'_>| n.attributes().contains(&a);
+    let leaf_of = |n: &imap::types::Name<'_>| {
+        let name = n.name();
+        utf7_imap(name.rsplit(n.delimiter().unwrap_or("/")).next().unwrap_or(name)).to_lowercase()
+    };
+    let junk: Vec<String> = names
+        .iter()
+        .find(|n| has(n, NameAttribute::Junk))
+        .or_else(|| names.iter().find(|n| !has(n, NameAttribute::NoSelect) && JUNK_NAMES.contains(&leaf_of(n).as_str())))
+        .map(|n| vec![n.name().to_string()])
+        .unwrap_or_default();
+    let junk_folders = || junk.iter().map(|n| Folder { name: n.clone(), sent: false });
     // Gmail: All Mail holds everything except spam and trash, including sent mail.
     if let Some(all) = names.iter().find(|n| has(n, NameAttribute::All)) {
-        return Ok(vec![Folder { name: all.name().to_string(), sent: false }]);
+        let mut out = vec![Folder { name: all.name().to_string(), sent: false }];
+        out.extend(junk_folders());
+        return Ok((out, junk));
     }
     let mut skipped: Vec<String> = Vec::new();
     let mut out = Vec::new();
@@ -145,7 +162,8 @@ fn choose_folders(s: &mut Imap) -> Result<Vec<Folder>, imap::Error> {
     }
     // INBOX first, then Sent, then the rest.
     out.sort_by_key(|f| (!f.name.eq_ignore_ascii_case("INBOX"), !f.sent));
-    Ok(out)
+    out.extend(junk_folders());
+    Ok((out, junk))
 }
 
 fn find_sent(s: &mut Imap) -> Option<String> {
@@ -293,7 +311,8 @@ impl Worker {
     }
 
     fn session(&mut self, s: &mut Imap) -> Result<(), imap::Error> {
-        let folders = choose_folders(s)?;
+        let (folders, junk) = choose_folders(s)?;
+        self.store.set_junk_folders(&self.acct.id, &junk);
         loop {
             self.status(|st| st.busy = true);
             let full = self.last_full.is_none_or(|t| t.elapsed() > FULL_RESCAN);
@@ -404,16 +423,22 @@ impl Worker {
         let me = self.me.read().unwrap().clone();
         let now = chrono::Utc::now().timestamp();
         let mut fresh = Vec::new();
+        let mut added = Vec::new();
         let _ = self.store.conn.execute_batch("BEGIN");
         for f in fetches.iter() {
             let (Some(uid), Some(h)) = (f.uid, crate::parse::header_from_fetch(f)) else { continue };
             let p = store::place(&h, &me, &self.acct.email);
             match self.store.add(&self.acct.id, folder, uid, &h, &p) {
-                Ok((id, true)) if notify && !p.outgoing && !h.seen && now - h.date < NOTIFY_MAX_AGE => fresh.push(id),
-                Ok(_) => {}
+                Ok((id, inserted)) => {
+                    added.push(id);
+                    if inserted && notify && !p.outgoing && !h.seen && now - h.date < NOTIFY_MAX_AGE {
+                        fresh.push(id);
+                    }
+                }
                 Err(e) => eprintln!("store: {e}"),
             }
         }
+        self.store.refresh_junk(&added);
         let _ = self.store.conn.execute_batch("COMMIT");
         if !fresh.is_empty() {
             self.shared.fresh.lock().unwrap().extend(fresh);

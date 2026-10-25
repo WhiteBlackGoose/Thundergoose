@@ -4,11 +4,39 @@ import "fonts/Inter-600.ttf";
 
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
-import { App, Tip, PeerItem, MessageItem, AttachmentItem, AccountItem, Participant } from "state.slint";
+import { App, Tip, PeerItem, MessageItem, AttachmentItem, AccountItem, Participant, AccountTag } from "state.slint";
 import { IconButton, Btn, Card, Divider, VDivider, Segmented, Avatar, Field, Chip, LinkText, FieldLabel, Spinner } from "widgets.slint";
 import { ListView, ScrollView, TextEdit, Palette } from "std-widgets.slint";
 
-export { App, Tip, Theme, Palette, PeerItem, MessageItem, AttachmentItem, AccountItem, Participant }
+export { App, Tip, Theme, Palette, PeerItem, MessageItem, AttachmentItem, AccountItem, Participant, AccountTag }
+
+/// "● work": which of your addresses something belongs to.
+component AccountBadge inherits Rectangle {
+    in property <AccountTag> tag;
+    in property <length> font-size: 10.5px;
+    height: self.font-size + 7px;
+    width: row.preferred-width + 10px;
+    border-radius: self.height / 2;
+    background: root.tag.color.with-alpha(0.14);
+    row := HorizontalLayout {
+        x: 5px;
+        spacing: 4px;
+        Rectangle {
+            width: 6px;
+            height: 6px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3px;
+            background: root.tag.color;
+        }
+        Text {
+            text: root.tag.label;
+            color: root.tag.color.mix(Theme.text, 0.7);
+            font-size: root.font-size;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+}
 
 component Brand inherits HorizontalLayout {
     spacing: 9px;
@@ -41,7 +69,7 @@ component PeerRow inherits Rectangle {
     callback flag(int);
     callback mark-read();
     // The quick buttons count as part of the row, or they would vanish under the pointer.
-    property <bool> hovered: ta.has-hover || q-fav.hovered || q-mute.hovered || q-ignore.hovered;
+    property <bool> hovered: ta.has-hover || q-fav.hovered || q-mute.hovered || q-ignore.hovered || q-spam.hovered;
     height: 66px;
     border-radius: 10px;
     background: selected ? Theme.accent-soft : ta.pressed ? Theme.pressed : root.hovered ? Theme.hover : transparent;
@@ -60,6 +88,10 @@ component PeerRow inherits Rectangle {
             MenuItem {
                 title: root.item.ignored ? @tr("Stop ignoring") : @tr("Ignore");
                 activated => { root.flag(2); }
+            }
+            MenuItem {
+                title: root.item.spam ? @tr("Not spam") : @tr("Mark as spam");
+                activated => { root.flag(3); }
             }
             if root.item.unread > 0: MenuSeparator { }
             if root.item.unread > 0: MenuItem {
@@ -139,6 +171,10 @@ component PeerRow inherits Rectangle {
                     horizontal-stretch: 1;
                     vertical-alignment: center;
                 }
+                for t in root.item.accounts: AccountBadge {
+                    tag: t;
+                    y: (parent.height - self.height) / 2;
+                }
                 if root.item.unread > 0: Rectangle {
                     height: 18px;
                     width: max(18px, badge.preferred-width + 10px);
@@ -198,6 +234,16 @@ component PeerRow inherits Rectangle {
                 tip: root.item.ignored ? @tr("Stop ignoring") : @tr("Ignore");
                 tip-side: 3;
                 clicked => { root.flag(2); }
+            }
+            q-spam := IconButton {
+                size: 26px;
+                icon-size: 14px;
+                icon: Icons.spam;
+                active: root.item.spam;
+                tint: Theme.text-muted;
+                tip: root.item.spam ? @tr("Not spam") : @tr("Mark as spam");
+                tip-side: 3;
+                clicked => { root.flag(3); }
             }
         }
     }
@@ -278,6 +324,7 @@ component Sidebar inherits Rectangle {
                     @tr("Chats") + (App.main-unread > 0 ? "  " + App.main-unread : ""),
                     @tr("Muted") + (App.muted-unread > 0 ? "  " + App.muted-unread : App.muted-count > 0 ? "  (" + App.muted-count + ")" : ""),
                     @tr("Ignored") + (App.ignored-count > 0 ? "  (" + App.ignored-count + ")" : ""),
+                    @tr("Spam") + (App.spam-count > 0 ? "  (" + App.spam-count + ")" : ""),
                 ];
                 selected <=> App.tab;
                 changed(i) => { App.set-tab(i); }
@@ -290,7 +337,7 @@ component Sidebar inherits Rectangle {
             padding: 24px;
             spacing: 6px;
             Text {
-                text: App.search != "" ? @tr("Nothing found") : App.tab == 1 ? @tr("No muted conversations. Use the bell on a chat to mute it.") : App.tab == 2 ? @tr("Nobody ignored. Use the ⊘ button on a chat to ignore it.") : App.accounts.length == 0 ? @tr("Add an account in Settings to get started") : App.syncing ? @tr("Fetching your mail…") : @tr("No conversations yet");
+                text: App.search != "" ? @tr("Nothing found") : App.tab == 1 ? @tr("No muted conversations. Use the bell on a chat to mute it.") : App.tab == 2 ? @tr("Nobody ignored. Use the ⊘ button on a chat to ignore it.") : App.tab == 3 ? @tr("No spam. Conversations from your Junk folders land here, and so do chats you mark as spam.") : App.accounts.length == 0 ? @tr("Add an account in Settings to get started") : App.syncing ? @tr("Fetching your mail…") : @tr("No conversations yet");
                 wrap: word-wrap;
                 color: Theme.text-muted;
                 font-size: Theme.font-md;
@@ -555,12 +602,29 @@ component MessageRow inherits VerticalLayout {
                         subtle: true;
                         clicked => { App.copy(root.m.text); }
                     }
-                    Text {
-                        text: root.m.via;
-                        color: Theme.text-faint;
+                    if root.m.junk: Text {
+                        text: @tr("in Junk");
+                        color: Theme.danger;
                         font-size: Theme.font-sm;
-                        overflow: elide;
-                        max-width: 320px;
+                        font-weight: 600;
+                    }
+                    if root.m.via != "": HorizontalLayout {
+                        spacing: 5px;
+                        max-width: 340px;
+                        Rectangle {
+                            width: 7px;
+                            height: 7px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 3.5px;
+                            background: root.m.via-color;
+                        }
+                        Text {
+                            text: root.m.via;
+                            color: root.m.via-color.mix(Theme.text-faint, 0.55);
+                            font-size: Theme.font-sm;
+                            font-weight: 500;
+                            overflow: elide;
+                        }
                     }
                     Text {
                         text: root.m.time;
@@ -773,12 +837,21 @@ component ChatHeader inherits Rectangle {
             alignment: center;
             spacing: 2px;
             horizontal-stretch: 1;
-            Text {
-                text: App.chat-title;
-                color: Theme.text;
-                font-size: Theme.font-lg;
-                font-weight: 600;
-                overflow: elide;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: App.chat-title;
+                    color: Theme.text;
+                    font-size: Theme.font-lg;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                for t in App.chat-accounts: AccountBadge {
+                    tag: t;
+                    font-size: 11.5px;
+                    y: (parent.height - self.height) / 2;
+                }
+                Rectangle { horizontal-stretch: 1; }
             }
             Text {
                 text: App.chat-subtitle;
@@ -819,6 +892,16 @@ component ChatHeader inherits Rectangle {
                 tip: App.chat-ignored ? @tr("Stop ignoring") : @tr("Ignore: move to the Ignored tab");
                 tip-side: 3;
                 clicked => { App.toggle-flag(-1, 2); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: Icons.spam;
+                active: App.chat-spam;
+                tip: App.chat-spam ? @tr("Not spam: move back to Chats") : @tr("Mark as spam");
+                tip-side: 3;
+                clicked => { App.toggle-flag(-1, 3); }
             }
         }
         VerticalLayout {

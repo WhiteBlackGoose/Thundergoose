@@ -88,6 +88,13 @@ pub fn take(out: &Path) -> Result<(), PlatformError> {
     settle();
     save(&window, &out.join("yourself-dark.png"));
 
+    look(1, 3);
+    crate::app::with_core(|c| c.set_tab(3));
+    open("billing@secure-renewal.example");
+    settle();
+    save(&window, &out.join("spam-light.png"));
+    crate::app::with_core(|c| c.set_tab(0));
+
     look(1, 1);
     open("notifications@github.com");
     ui.global::<App>().set_settings_open(true);

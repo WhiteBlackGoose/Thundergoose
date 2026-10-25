@@ -14,6 +14,13 @@ export global Tip {
     }
 }
 
+/// One of your own addresses, as a small colored tag.
+export struct AccountTag {
+    label: string,
+    color: color,
+    addr: string,
+}
+
 export struct PeerItem {
     key: string,
     title: string,
@@ -35,6 +42,9 @@ export struct PeerItem {
     has-icon: bool,
     /// The "Yourself" conversation.
     me: bool,
+    spam: bool,
+    /// Your addresses this contact writes to, most recent first.
+    accounts: [AccountTag],
 }
 
 export struct AttachmentItem {
@@ -60,6 +70,9 @@ export struct MessageItem {
     full-time: string,
     day: string,
     via: string,
+    via-color: color,
+    /// Only in a Junk folder.
+    junk: bool,
     loading: bool,
     has-html: bool,
     unread: bool,
@@ -100,6 +113,7 @@ export global App {
     in property <int> muted-unread;
     in property <int> muted-count;
     in property <int> ignored-count;
+    in property <int> spam-count;
     in property <string> sync-text;
 
     // Conversation
@@ -115,6 +129,8 @@ export global App {
     in property <bool> chat-favorite;
     in property <bool> chat-muted;
     in property <bool> chat-ignored;
+    in property <bool> chat-spam;
+    in property <[AccountTag]> chat-accounts;
     in property <[Participant]> chat-people;
     in property <[MessageItem]> messages;
     in property <bool> has-earlier;
@@ -197,7 +213,7 @@ export global App {
     callback write-to(string);
     callback set-tab(int);
     callback open-chat(string);
-    /// Toggle favorite (0), muted (1) or ignored (2) of the row at index, or of the open chat with -1.
+    /// Toggle favorite (0), muted (1), ignored (2) or spam (3) of the row at index, or of the open chat with -1.
     callback toggle-flag(int, int);
     callback mark-read-at(int);
     callback notify-changed();

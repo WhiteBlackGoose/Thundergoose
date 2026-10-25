@@ -27,6 +27,8 @@ const PEOPLE: &[(&str, &str)] = &[
     ("NixOS Discourse", "discourse@discourse.nixos.org"),
     ("Rust Users Forum", "digest@users.rust-lang.org"),
     ("Mega Deals", "deals@mega-deals.example"),
+    ("Billing", "billing@secure-renewal.example"),
+    ("Prize Office", "office@lucky-draw.example"),
 ];
 const ME: usize = 0;
 const WORK: usize = 1;
@@ -41,6 +43,8 @@ const CODEBERG: usize = 9;
 const NIXOS: usize = 10;
 const RUST: usize = 11;
 const DEALS: usize = 12;
+const BILLING: usize = 13;
+const PRIZE: usize = 14;
 
 enum File {
     Photo(u8, &'static str),
@@ -56,15 +60,21 @@ struct Mail {
     text: &'static str,
     seen: bool,
     file: Option<File>,
+    /// Lives in the Junk folder.
+    junk: bool,
 }
 
 const fn m(when: (i64, u32, u32), from: usize, to: &'static [usize], subject: &'static str, text: &'static str) -> Mail {
-    Mail { when, from, to, subject, text, seen: true, file: None }
+    Mail { when, from, to, subject, text, seen: true, file: None, junk: false }
 }
 
 impl Mail {
     const fn unread(mut self) -> Self {
         self.seen = false;
+        self
+    }
+    const fn junk(mut self) -> Self {
+        self.junk = true;
         self
     }
     const fn with(mut self, f: File) -> Self {
@@ -76,46 +86,45 @@ impl Mail {
 fn mails() -> Vec<Mail> {
     vec![
         // Maya
-        m((3, 19, 2), MAYA, &[ME], "October", "Did you end up booking the cabin for October?"),
-        m((3, 19, 30), ME, &[MAYA], "Re: October", "Yes! Lake Toya, three nights. I'll send you the details later."),
-        m((1, 18, 40), MAYA, &[ME], "Re: October", "Can't wait. Should I bring the camera?"),
-        m((1, 18, 52), ME, &[MAYA], "Re: October", "Please do. And the tripod, the stars up there are unreal."),
-        m((0, 9, 12), MAYA, &[ME], "From last year", "Look what I found from last year's trip").with(File::Photo(0, "lake-toya.jpg")),
-        m((0, 9, 20), ME, &[MAYA], "Re: From last year", "Wow, that sunset! You should frame it."),
-        m((0, 9, 31), MAYA, &[ME], "Re: From last year", "Haha, maybe. See you on Saturday!"),
+        m((3, 19, 2), MAYA, &[ME], "Cabin in October?", "Hey Sam,\n\ndid you end up booking the cabin for October? Kenji asked me yesterday and I didn't know what to tell him.\n\nMaya"),
+        m((3, 19, 30), ME, &[MAYA], "Re: Cabin in October?", "Hi Maya,\n\nyes! Lake Toya, three nights from the 23rd. I'll send you the booking confirmation once it arrives.\n\nCheers,\nSam"),
+        m((1, 18, 40), MAYA, &[ME], "Re: Cabin in October?", "Perfect. Should I bring my camera? The old one is heavy, but the photos are so much better.\n\nM."),
+        m((1, 18, 52), ME, &[MAYA], "Re: Cabin in October?", "Please do, and the tripod too. The stars up there are unreal.\n\nSam"),
+        m((0, 9, 12), MAYA, &[ME], "From last year", "Hi Sam,\n\nI was cleaning up my laptop and found this one from last year's trip. Still my favourite.\n\nSee you soon,\nMaya").with(File::Photo(0, "IMG_4127.jpg")),
+        m((0, 9, 20), ME, &[MAYA], "Re: From last year", "Wow, I had forgotten about that evening. You should print it, honestly.\n\nSam"),
         // Maya, Leo, Priya
-        m((0, 8, 2), MAYA, &[ME, LEO, PRIYA], "Saturday hike", "Hi all! Saturday, 8:00 at the trailhead parking? The weather looks great."),
-        m((0, 8, 15), LEO, &[ME, MAYA, PRIYA], "Re: Saturday hike", "I'm in. I can drive two people."),
-        m((0, 8, 40), PRIYA, &[ME, MAYA, LEO], "Re: Saturday hike", "Count me in, I'll bring snacks."),
-        m((0, 8, 52), ME, &[MAYA, LEO, PRIYA], "Re: Saturday hike", "Perfect, see you all at 8! I'll bring the map and a thermos of tea."),
-        m((0, 10, 3), LEO, &[ME, MAYA, PRIYA], "Re: Saturday hike", "Do we need to reserve parking?").unread(),
+        m((0, 8, 2), MAYA, &[ME, LEO, PRIYA], "Saturday hike", "Hi everyone,\n\nhow about Saturday at 8:00 at the trailhead parking? The forecast says sunny and 18°. The loop takes about five hours with a lunch break.\n\nLet me know if you're in!\nMaya"),
+        m((0, 8, 15), LEO, &[ME, MAYA, PRIYA], "Re: Saturday hike", "I'm in. I can drive two people, I'll pick up whoever wants a ride at the station at 7:30.\n\nLeo"),
+        m((0, 8, 40), PRIYA, &[ME, MAYA, LEO], "Re: Saturday hike", "Count me in! I'll bring snacks and the first aid kit.\n\nPriya"),
+        m((0, 10, 3), LEO, &[ME, MAYA, PRIYA], "Re: Saturday hike", "Quick question: do we need to reserve parking? Last time it was full by 8:30.").unread(),
         // Leo
-        m((1, 12, 5), LEO, &[ME], "Bike repair", "Here's the invoice for the bike repair. Thanks again for lending me the tools!").with(File::Pdf("invoice-0815.pdf")),
-        m((1, 13, 0), ME, &[LEO], "Re: Bike repair", "Thanks, paid!"),
-        m((0, 11, 5), LEO, &[ME], "Tent", "By the way, do you still have my tent?").unread(),
-        m((0, 11, 6), LEO, &[ME], "Re: Tent", "No rush, just need it by Friday.").unread(),
+        m((1, 12, 5), LEO, &[ME], "Bike repair invoice", "Hi Sam,\n\nas promised, here's the invoice for the bike repair. No hurry with the payment.\n\nThanks again for lending me your tools!\nLeo").with(File::Pdf("Invoice-2026-0815.pdf")),
+        m((1, 13, 0), ME, &[LEO], "Re: Bike repair invoice", "Paid, thanks Leo!\n\nSam"),
+        m((0, 11, 5), LEO, &[ME], "Your tent", "Hey,\n\nby the way, do you still have my tent from the summer? I'd need it back by Friday for a trip with my brother.\n\nLeo").unread(),
         // Priya, at work
-        m((2, 9, 14), PRIYA, &[WORK], "Q4 roadmap draft", "I've put the roadmap draft in the shared folder. Could you review the onboarding section before Thursday?"),
-        m((2, 9, 40), WORK, &[PRIYA], "Re: Q4 roadmap draft", "Sure, you'll have my comments by Wednesday evening."),
-        m((2, 9, 41), PRIYA, &[WORK], "Re: Q4 roadmap draft", "Perfect, thank you!"),
-        m((0, 8, 30), WORK, &[PRIYA], "Re: Q4 roadmap draft", "Done. I left comments on onboarding and on the import flow."),
+        m((2, 9, 14), PRIYA, &[WORK], "Q4 roadmap draft", "Hi Sam,\n\nI've put the first draft of the Q4 roadmap in the shared folder. Could you review the onboarding section before Thursday's meeting? I'm especially unsure about the import flow.\n\nThanks,\nPriya\n\n-- \nPriya Natarajan\nProduct Lead, Northwind Labs"),
+        m((2, 9, 40), WORK, &[PRIYA], "Re: Q4 roadmap draft", "Hi Priya,\n\nsure, you'll have my comments by Wednesday evening.\n\nBest,\nSam"),
+        m((0, 8, 30), WORK, &[PRIYA], "Re: Q4 roadmap draft", "Hi Priya,\n\ndone. I left comments on onboarding and on the import flow. In short: I'd move the account import before the tour, people want to see their own mail first.\n\nHappy to talk it through on Thursday.\n\nBest,\nSam"),
         // Mom
-        m((1, 20, 15), MOM, &[ME], "Sunday", "Are you coming for dinner on Sunday? Dad is making paella."),
-        m((1, 20, 31), ME, &[MOM], "Re: Sunday", "Of course! I'll bring dessert."),
+        m((1, 20, 15), MOM, &[ME], "Sunday dinner", "Hi darling,\n\nare you coming for dinner on Sunday? Dad is making his paella again. Bring Maya if she has time!\n\nLove,\nMom"),
+        m((1, 20, 31), ME, &[MOM], "Re: Sunday dinner", "Hi Mom,\n\nof course, I'll be there around 6. I'll bring dessert.\n\nLove,\nSam"),
         // Jonas, Aiko
-        m((4, 16, 0), JONAS, &[WORK], "Slides", "Great talk yesterday! Could you send me the slides?"),
-        m((4, 16, 45), WORK, &[JONAS], "Re: Slides", "Here you go. The demo part is in the appendix.").with(File::Pdf("mail-as-conversations.pdf")),
-        m((6, 21, 10), AIKO, &[ME], "The book", "Thank you for the book recommendation! I finished it in two evenings."),
+        m((4, 16, 0), JONAS, &[WORK], "Slides from yesterday", "Hello Sam,\n\nthank you for the great talk at yesterday's meetup! Would you mind sending me the slides? I'd like to share them with my team.\n\nKind regards,\nJonas Becker"),
+        m((4, 16, 45), WORK, &[JONAS], "Re: Slides from yesterday", "Hi Jonas,\n\nglad you liked it! Here they are. The demo part is in the appendix.\n\nBest regards,\nSam").with(File::Pdf("mail-as-conversations.pdf")),
+        m((6, 21, 10), AIKO, &[ME], "The book", "Dear Sam,\n\nthank you so much for the book recommendation. I finished it in two evenings and now I'm looking for the sequel.\n\nWarm wishes from Osaka,\nAiko"),
         // Services
-        m((2, 15, 3), GITHUB, &[ME], "[rivera/thundergoose] Release v0.2.0", "v0.2.0 has been published.\n\nWebsite icons, image previews and a Yourself conversation."),
-        m((0, 7, 58), GITHUB, &[ME], "Re: [rivera/thundergoose] Quick actions in the chat list (#42)", "maya-chen approved these changes.\n\nLooks great, merging after CI.").unread(),
-        m((1, 6, 30), CODEBERG, &[ME], "New sign-in to your account", "A new sign-in to your account was detected from Firefox on Linux.").unread(),
-        m((0, 6, 0), NIXOS, &[ME], "[NixOS Discourse] Summary", "Popular topics this week: flakes in practice, a new installer, and the 26.11 release schedule.").unread(),
-        m((5, 6, 0), RUST, &[ME], "[Rust Users] Weekly digest", "Popular topics: async traits in practice, a GUI with Slint, and error handling patterns."),
+        m((2, 15, 3), GITHUB, &[ME], "[rivera/thundergoose] Release v0.2.0", "rivera released v0.2.0\n\nWebsite icons, image previews and a Yourself conversation.\n\n—\nYou are receiving this because you are watching this repository."),
+        m((0, 7, 58), GITHUB, &[ME], "Re: [rivera/thundergoose] Quick actions in the chat list (#42)", "@maya-chen approved this pull request.\n\nLooks great, merging after CI passes.\n\n—\nReply to this email directly or view it on GitHub.").unread(),
+        m((1, 6, 30), CODEBERG, &[ME], "New sign-in to your account", "Hello sam,\n\na new sign-in to your account was detected from Firefox on Linux. If this was you, there's nothing to do.\n\nThe Codeberg team").unread(),
+        m((0, 6, 0), NIXOS, &[ME], "[NixOS Discourse] Summary", "Here's a summary of what happened this week:\n\n• Flakes in practice: share your setups\n• The new graphical installer\n• Release schedule for 26.11").unread(),
+        m((5, 6, 0), RUST, &[ME], "[Rust Users] Weekly digest", "Popular topics this week:\n\n• Async traits in practice\n• Building a desktop GUI with Slint\n• Error handling patterns for libraries"),
         m((0, 5, 12), DEALS, &[ME], "Only today: 70% off everything!!!", "Don't miss out! Our biggest sale of the year ends at midnight.").unread(),
+        // Spam folder
+        m((0, 4, 41), BILLING, &[ME], "Your subscription will expire soon", "Dear Customer,\n\nyour subscription will expire in 2 days. To avoid interruption of your service, renew now:\n\nhttps://renew-now.example/account?id=7f3a9c\n\nBilling Department").unread().junk(),
+        m((1, 3, 12), PRIZE, &[WORK], "Congratulations, you have been selected", "Dear Winner,\n\nyour email address was selected in our annual draw. To claim your prize of $1,500,000, reply with your full name and bank details.\n\nMr. D. Richards").unread().junk(),
         // Yourself
         m((5, 22, 4), ME, &[WORK], "Cabin", "Cabin Wi-Fi: lakeview-guest\nPassword: pinecone42\nCheck-in after 15:00, key box code 2741."),
-        m((0, 7, 50), WORK, &[ME], "Whiteboard", "Whiteboard from the planning session").with(File::Photo(1, "whiteboard.jpg")),
+        m((0, 7, 50), WORK, &[ME], "Whiteboard", "Whiteboard from the planning session, for Thursday.").with(File::Photo(1, "whiteboard.jpg")),
     ]
 }
 
@@ -219,7 +228,7 @@ fn photo(variant: u8) -> Vec<u8> {
     out
 }
 
-fn raw_message(n: usize, mail: &Mail, date: i64) -> Vec<u8> {
+fn raw_message(n: usize, mail: &Mail, text: &str, date: i64) -> Vec<u8> {
     let mut b = Message::builder()
         .from(mailbox(mail.from))
         .subject(mail.subject)
@@ -229,14 +238,14 @@ fn raw_message(n: usize, mail: &Mail, date: i64) -> Vec<u8> {
         b = b.to(mailbox(t));
     }
     let msg = match &mail.file {
-        None => b.header(ContentType::TEXT_PLAIN).body(mail.text.to_string()),
+        None => b.header(ContentType::TEXT_PLAIN).body(text.to_string()),
         Some(file) => {
             let (name, mime, bytes) = match file {
                 File::Photo(v, name) => (*name, "image/jpeg", photo(*v)),
                 File::Pdf(name) => (*name, "application/pdf", pdf(mail.subject)),
             };
             let att = Attachment::new(name.to_string()).body(bytes, ContentType::parse(mime).expect("mime"));
-            b.multipart(MultiPart::mixed().singlepart(SinglePart::plain(mail.text.to_string())).singlepart(att))
+            b.multipart(MultiPart::mixed().singlepart(SinglePart::plain(text.to_string())).singlepart(att))
         }
     };
     msg.expect("demo message").formatted()
@@ -270,11 +279,24 @@ fn seed(paths: &Paths, accounts: &[Account]) -> rusqlite::Result<()> {
     let names: HashMap<String, String> = PEOPLE.iter().skip(2).map(|(n, a)| (a.to_string(), n.to_string())).collect();
     store.import_names(&names);
     let today = Local::now().date_naive();
+    // Replies quote the mail before them, the way mail programs do.
+    let mut threads: HashMap<String, (String, i64, usize)> = HashMap::new();
     for (n, mail) in mails().iter().enumerate() {
         let (days, hh, mm) = mail.when;
         let day = today - chrono::Duration::days(days);
         let date = Local.from_local_datetime(&day.and_hms_opt(hh, mm, 0).expect("time")).single().map(|t| t.timestamp()).unwrap_or(0);
-        let raw = raw_message(n, mail, date);
+        let topic = mail.subject.trim_start_matches("Re: ").to_string();
+        let text = match threads.get(&topic).filter(|_| mail.subject.starts_with("Re: ")) {
+            Some((prev, prev_date, prev_from)) => {
+                let when = Local.timestamp_opt(*prev_date, 0).single().map(|t| t.format("%a, %-d %b %Y at %H:%M").to_string()).unwrap_or_default();
+                let (name, addr) = PEOPLE[*prev_from];
+                let quoted: Vec<String> = prev.lines().map(|l| if l.starts_with('>') { format!(">{l}") } else { format!("> {l}") }).collect();
+                format!("{}\n\nOn {when}, {name} <{addr}> wrote:\n{}", mail.text, quoted.join("\n"))
+            }
+            None => mail.text.to_string(),
+        };
+        threads.insert(topic, (text.clone(), date, mail.from));
+        let raw = raw_message(n, mail, &text, date);
         let account = if mail.from == WORK || mail.to.contains(&WORK) { &accounts[1] } else { &accounts[0] };
         let header = Header {
             msgid: format!("demo-{n}@thundergoose.example"),
@@ -288,8 +310,12 @@ fn seed(paths: &Paths, accounts: &[Account]) -> rusqlite::Result<()> {
             seen: mail.seen || mail.from <= WORK,
         };
         let placement = store::place(&header, &me, &account.email);
-        let (id, _) = store.add(&account.id, "INBOX", n as u32 + 1, &header, &placement)?;
+        let folder = if mail.junk { "Junk" } else { "INBOX" };
+        let (id, _) = store.add(&account.id, folder, n as u32 + 1, &header, &placement)?;
         store.set_body(id, &raw, &crate::parse::body(&raw))?;
+    }
+    for a in accounts {
+        store.set_junk_folders(&a.id, &["Junk".to_string()]);
     }
     store.set_flag(PEOPLE[MAYA].1, store::Flag::Favorite, true);
     store.set_flag(PEOPLE[PRIYA].1, store::Flag::Favorite, true);
