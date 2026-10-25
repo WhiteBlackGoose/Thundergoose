@@ -191,6 +191,7 @@ directory.
 | <kbd>Enter</kbd> in search | Open the first result |
 | <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>Alt</kbd>+<kbd>↓</kbd> | Previous / next conversation |
 | <kbd>Ctrl</kbd>+<kbd>N</kbd> | New conversation |
+| <kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>Ctrl</kbd>+<kbd>−</kbd> / <kbd>Ctrl</kbd>+<kbd>0</kbd> | Larger / smaller / normal interface size (also in Settings → Appearance) |
 | <kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Send |
 | <kbd>F5</kbd> / <kbd>Ctrl</kbd>+<kbd>R</kbd> | Check for new mail |
 | <kbd>Esc</kbd> | Close dialog / cancel new conversation |

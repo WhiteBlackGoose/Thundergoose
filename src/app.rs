@@ -21,6 +21,12 @@ use crate::sync::{self, Cmd, Shared};
 use crate::{AccountItem, AccountTag, App, AppWindow, AttachmentItem, MessageItem, Palette, Participant, PeerItem, Theme};
 
 const PAGE: usize = 60;
+/// Interface sizes offered in Settings.
+const UI_SCALES: [f32; 6] = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5];
+
+fn scale_index(scale: f32) -> usize {
+    UI_SCALES.iter().enumerate().min_by(|a, b| (a.1 - scale).abs().total_cmp(&(b.1 - scale).abs())).map_or(2, |(i, _)| i)
+}
 const MAX_INLINE_TEXT: usize = 6000;
 /// Image attachments up to this size are shown in the conversation.
 const MAX_PREVIEW_BYTES: usize = 10 * 1024 * 1024;
@@ -265,6 +271,9 @@ pub struct Core {
     demo: bool,
     /// The Thunderbird profile on this computer, offered for import.
     tb_found: Option<PathBuf>,
+    /// The scale factor the system gave the window, and the one we last set on top of it.
+    base_scale: f32,
+    applied_scale: f32,
     /// HTML renderings; `None` while rendering or when it failed.
     html_cache: HashMap<HtmlKey, Option<HtmlView>>,
     html_jobs: HtmlJobs,
@@ -1039,6 +1048,7 @@ impl Core {
         app.set_accent(self.settings.accent);
         app.set_theme_mode(self.settings.theme);
         app.set_show_favicons(self.settings.favicons);
+        app.set_ui_scale(scale_index(self.settings.ui_scale) as i32);
     }
 
     // ------------------------------------------------------ notifications
@@ -1259,7 +1269,35 @@ impl Core {
         app.set_add_busy(busy);
     }
 
+    /// Keeps the window at the system's scale times the chosen interface size. Slint takes its
+    /// scale factor from the system once, so the size is applied as a scale-factor change; when
+    /// the system's factor changes (another monitor), it becomes the new base.
+    fn apply_scale(&mut self) {
+        let ui = self.ui();
+        let window = ui.window();
+        let current = window.scale_factor();
+        if (current - self.applied_scale).abs() > 0.001 {
+            self.base_scale = current;
+        }
+        let target = self.base_scale * self.settings.ui_scale;
+        if (current - target).abs() > 0.001 {
+            window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: target });
+            // Same pixels, new logical size: lay out again for it.
+            let px = window.size();
+            window.dispatch_event(slint::platform::WindowEvent::Resized { size: slint::LogicalSize::new(px.width as f32 / target, px.height as f32 / target) });
+        }
+        self.applied_scale = target;
+    }
+
+    fn set_ui_scale(&mut self, scale: f32) {
+        self.settings.ui_scale = scale;
+        let _ = save_json(&self.paths.settings(), &self.settings, false);
+        self.ui().global::<App>().set_ui_scale(scale_index(scale) as i32);
+        self.apply_scale();
+    }
+
     fn tick(&mut self) {
+        self.apply_scale();
         self.notify_fresh();
         if self.favicons.updated.swap(false, Ordering::Relaxed) {
             self.icons.retain(|_, v| v.is_some());
@@ -1452,6 +1490,8 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         self_to: String::new(),
         demo,
         tb_found: profile,
+        base_scale: 1.0,
+        applied_scale: 0.0,
         html_cache: HashMap::new(),
         html_jobs,
         html_tx,
@@ -1479,6 +1519,10 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         }
     }
 
+    // Development aid: start with another interface size.
+    if let Some(scale) = std::env::var("THUNDERGOOSE_UI_SCALE").ok().and_then(|v| v.parse::<f32>().ok()) {
+        core.borrow_mut().settings.ui_scale = scale.clamp(0.5, 3.0);
+    }
     // Development aid: open a conversation on startup.
     match std::env::var("THUNDERGOOSE_OPEN").as_deref() {
         Ok(":settings") => app.set_settings_open(true),
@@ -1938,6 +1982,10 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         let app = ui.global::<App>();
             c.settings.accent = app.get_accent();
             c.settings.theme = app.get_theme_mode();
+            let scale = UI_SCALES[(app.get_ui_scale().max(0) as usize).min(UI_SCALES.len() - 1)];
+            if (scale - c.settings.ui_scale).abs() > 0.001 {
+                c.set_ui_scale(scale);
+            }
             let favicons_changed = app.get_show_favicons() != c.settings.favicons;
             c.settings.favicons = app.get_show_favicons();
             c.apply_appearance();
@@ -1948,6 +1996,14 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
                     c.load_conversation(false);
                 }
             }
+        })
+    });
+    app.on_zoom(|step| {
+        with_core(|c| {
+            let i = scale_index(c.settings.ui_scale) as i32;
+            let next = if step == 0 { 2 } else { (i + step).clamp(0, UI_SCALES.len() as i32 - 1) };
+            c.set_ui_scale(UI_SCALES[next as usize]);
+            c.toast(format!("Interface size {}%", (UI_SCALES[next as usize] * 100.0).round()), false);
         })
     });
     app.on_dismiss_toast(|| {

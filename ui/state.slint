@@ -173,6 +173,8 @@ export global App {
     in-out property <bool> notify-desktop;
     in-out property <bool> notify-sound;
     in-out property <bool> show-favicons: true;
+    /// Index into the interface sizes 80, 90, 100, 110, 125, 150 %.
+    in-out property <int> ui-scale: 2;
 
     // Account setup
     in-out property <bool> add-open;
@@ -210,6 +212,8 @@ export global App {
     /// Load remote images of a mail; `true`: always for its sender.
     callback load-images(int, bool);
     callback toggle-format(int);
+    /// Interface size one step larger (1), smaller (-1) or back to 100 % (0).
+    callback zoom(int);
     callback open-attachment(int, int);
     callback save-attachment(int, int);
     callback copy(string);

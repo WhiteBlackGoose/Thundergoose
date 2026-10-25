@@ -94,6 +94,13 @@ pub struct Settings {
     /// means: linked if accounts were imported from it.
     #[serde(default)]
     pub thunderbird_linked: Option<bool>,
+    /// Interface size on top of the system's scaling (1.0 = as the system says).
+    #[serde(default = "one")]
+    pub ui_scale: f32,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 impl Settings {
@@ -104,7 +111,7 @@ impl Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { accent: 0, theme: 0, thunderbird_profile: None, notify_desktop: true, notify_sound: true, favicons: true, thunderbird_linked: None }
+        Settings { accent: 0, theme: 0, thunderbird_profile: None, notify_desktop: true, notify_sound: true, favicons: true, thunderbird_linked: None, ui_scale: 1.0 }
     }
 }
 

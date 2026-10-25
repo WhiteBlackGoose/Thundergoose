@@ -1656,6 +1656,16 @@ component SettingsDialog inherits Rectangle {
                 }
                 HorizontalLayout {
                     spacing: 12px;
+                    FieldLabel { text: @tr("Size"); width: 70px; }
+                    Segmented {
+                        width: 400px;
+                        items: ["80%", "90%", "100%", "110%", "125%", "150%"];
+                        selected <=> App.ui-scale;
+                        changed => { App.appearance-changed(); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
                     alignment: start;
                     FieldLabel { text: @tr("Accent"); width: 70px; }
                     for c[i] in [#6a4cf5, #1f6fe5, #0d9488, #e8710a, #e11d48]: Rectangle {
@@ -1716,6 +1726,18 @@ export component AppWindow inherits Window {
             }
             if e.modifiers.control && e.text == "n" {
                 App.start-new-chat();
+                return accept;
+            }
+            if e.modifiers.control && (e.text == "+" || e.text == "=") {
+                App.zoom(1);
+                return accept;
+            }
+            if e.modifiers.control && (e.text == "-" || e.text == "_") {
+                App.zoom(-1);
+                return accept;
+            }
+            if e.modifiers.control && e.text == "0" {
+                App.zoom(0);
                 return accept;
             }
             if e.text == Key.F5 || (e.modifiers.control && e.text == "r") {
