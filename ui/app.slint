@@ -1177,6 +1177,14 @@ component ChatView inherits Rectangle {
     function to-bottom() {
         sv.content-y = min(0px, sv.visible-height - sv.content-height);
     }
+    // While following the bottom: jump now, and again once the layout has settled, since a
+    // change notification can arrive before the view's own size is up to date (seen at 150 %).
+    function follow() {
+        if root.stick {
+            root.to-bottom();
+            root.pending-scroll = true;
+        }
+    }
     changed token => {
         root.stick = true;
         root.to-bottom();
@@ -1186,7 +1194,9 @@ component ChatView inherits Rectangle {
         interval: 30ms;
         running: root.pending-scroll;
         triggered => {
-            root.to-bottom();
+            if root.stick {
+                root.to-bottom();
+            }
             root.pending-scroll = false;
         }
     }
@@ -1199,11 +1209,10 @@ component ChatView inherits Rectangle {
         Divider { }
         sv := ScrollView {
             vertical-stretch: 1;
-            changed content-height => {
-                if root.stick {
-                    root.to-bottom();
-                }
-            }
+            changed content-height => { root.follow(); }
+            // The view itself shrinks or rewraps too: composer rows, banners, scaling.
+            changed visible-height => { root.follow(); }
+            changed visible-width => { root.follow(); }
             scrolled => {
                 root.stick = self.content-y <= self.visible-height - self.content-height + 40px;
             }
