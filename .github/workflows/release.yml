@@ -33,6 +33,7 @@ jobs:
       - name: Package
         run: |
           cargo install cargo-deb --locked
+          mkdir -p dist
           cargo deb --no-build --output dist/
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           mv dist/*.deb "dist/Thundergoose-${version}-ubuntu-amd64.deb"
@@ -55,6 +56,7 @@ jobs:
       - name: Package
         run: |
           cargo install cargo-generate-rpm --locked
+          mkdir -p dist
           cargo generate-rpm --output dist/
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           mv dist/*.rpm "dist/Thundergoose-${version}-fedora-x86_64.rpm"
