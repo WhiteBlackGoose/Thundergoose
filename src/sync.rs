@@ -595,6 +595,7 @@ pub fn me_addresses(accounts: &[Account]) -> HashSet<String> {
 pub fn spawn(acct: Account, me: Me, creds: Arc<Creds>, shared: Arc<Shared>, paths: &Paths) -> Sender<Cmd> {
     let (tx, rx) = std::sync::mpsc::channel();
     let db = paths.db();
+    let (idle_acct, idle_creds) = (acct.clone(), creds.clone());
     shared.set_status(&acct.id, |s| s.message = "Starting…".into());
     std::thread::Builder::new()
         .name(format!("sync {}", acct.email))
@@ -609,5 +610,34 @@ pub fn spawn(acct: Account, me: Me, creds: Arc<Creds>, shared: Arc<Shared>, path
             Worker { acct, me, creds, shared, store, rx, pending: VecDeque::new(), uids: Vec::new(), last_full: None, stopped: false }.run();
         })
         .expect("spawn sync thread");
+    let wake = tx.clone();
+    std::thread::Builder::new().name("idle".into()).spawn(move || idle(&idle_acct, &idle_creds, &wake)).expect("spawn idle thread");
     tx
+}
+
+/// Keeps a second connection in IMAP IDLE on the INBOX, so the server tells us about new mail
+/// the moment it arrives; the sync thread is woken up to fetch it. Servers without IDLE are
+/// left to the regular poll.
+fn idle(acct: &Account, creds: &Creds, wake: &Sender<Cmd>) {
+    let mut backoff = 15;
+    loop {
+        if let Ok(mut s) = imapc::connect(acct, creds) {
+            if !s.capabilities().is_ok_and(|c| c.has_str("IDLE")) {
+                let _ = s.logout();
+                return;
+            }
+            if s.select("INBOX").is_ok() {
+                backoff = 15;
+                // Refreshed every 20 minutes; returns when the mailbox changes.
+                while let Ok(outcome) = s.idle().timeout(Duration::from_secs(20 * 60)).wait_while(imap::extensions::idle::stop_on_any) {
+                    if matches!(outcome, imap::extensions::idle::WaitOutcome::MailboxChanged) && wake.send(Cmd::Wake).is_err() {
+                        // The account was removed.
+                        return;
+                    }
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_secs(backoff));
+        backoff = (backoff * 2).min(600);
+    }
 }

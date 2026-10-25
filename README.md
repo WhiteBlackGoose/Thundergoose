@@ -63,8 +63,9 @@ from and which one gets it; the bubbles show the way it went.</td>
   mailbox providers keep their initials. Can be switched off in Settings.
 - **Pictures inline.** Image attachments up to 10 MiB show right in the bubble (rotated the way
   the camera meant); click to open, hover to save. Everything else is a one-click attachment chip.
-- **Your Thunderbird accounts, without setting anything up.** Servers, passwords and OAuth
-  sign-ins are taken from the Thunderbird profile ([details below](#your-thunderbird-accounts-without-setting-anything-up)).
+- **Your Thunderbird accounts, if you want them.** On first start Thundergoose offers to take
+  over servers, passwords and OAuth sign-ins from your Thunderbird profile, or you set accounts
+  up yourself ([details below](#your-thunderbird-accounts-without-setting-anything-up)).
 - **Or add accounts in the app.** *Settings → Add account* finds the servers for an address:
   presets for Gmail/Outlook, the provider's autoconfig file, Thunderbird's ISP database, the
   domain's MX record (so Google Workspace and Microsoft 365 domains are recognized), and as a
@@ -81,7 +82,10 @@ from and which one gets it; the bubbles show the way it went.</td>
   headers are filled in; change the subject to start a new topic.
 - **Search** across names, addresses, subjects and message text. Type an address you have no
   conversation with yet to start one.
-- **Notifications** with a short chime, both optional.
+- **Instant notifications.** Each account keeps an IMAP IDLE connection, so new mail shows up
+  the moment the server has it, as a native notification (GNOME/KDE/… on Linux, Notification
+  Center on macOS, toasts on Windows) with a short chime. Clicking it opens the conversation.
+  *Settings → Send a test notification* or `thundergoose --notify-test` checks the setup.
 - **Read state syncs both ways.** Opening a conversation marks it read on the server.
 - **Newest first, cached.** Sync walks back in time: new mail first, then older headers in
   chunks, with the newest bodies downloaded in between, so recent mail is readable within
@@ -115,7 +119,8 @@ without a display.
 
 ## Your Thunderbird accounts, without setting anything up
 
-On first start Thundergoose reads your Thunderbird profile and takes over:
+Nothing is read from Thunderbird until you ask. If a profile is found, the first start offers
+*Import from Thunderbird* (also in *Settings* later), which takes over:
 
 | What | How |
 | --- | --- |
@@ -124,10 +129,12 @@ On first start Thundergoose reads your Thunderbird profile and takes over:
 | OAuth2 sign-ins (Gmail, Google Workspace, Microsoft 365 / Outlook) | Thunderbird's refresh tokens, used with Thunderbird's own OAuth client registration, so they stay valid |
 | Contact names | Thunderbird address books and collected addresses |
 
-There's nothing to log in to. If a token expires, Thundergoose first picks up the newer one that
-Thunderbird may have stored. Otherwise *Settings → Sign in* runs the same browser sign-in
-Thunderbird uses (localhost redirect). Password accounts can get a new password there too.
-*Settings → Re-import from Thunderbird* reads the profile again.
+After importing there's nothing to log in to. While *Stay linked* is on (Settings, on after an
+import), contact names keep coming from Thunderbird's address books, and an expired token is
+replaced by the newer one Thunderbird may have stored. Switch it off and Thundergoose never reads
+the profile again. Either way, *Settings → Sign in* runs the same browser sign-in Thunderbird
+uses (localhost redirect), and password accounts can get a new password there.
+*Import from Thunderbird* can be run again at any time.
 
 Profiles are found at `~/.thunderbird`, the Flatpak and Snap locations,
 `~/Library/Thunderbird` (macOS) and `%APPDATA%\Thunderbird` (Windows). If you set a primary

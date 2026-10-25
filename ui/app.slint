@@ -1442,6 +1442,52 @@ component SettingsDialog inherits Rectangle {
                         clicked => { App.settings-open = false; }
                     }
                 }
+                if App.accounts.length == 0 && App.profile-path != "" && !App.add-open: Rectangle {
+                    border-radius: Theme.radius;
+                    background: Theme.accent-soft;
+                    border-width: 1px;
+                    border-color: Theme.accent.with-alpha(0.35);
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 10px;
+                        Text {
+                            text: @tr("Welcome! Use your Thunderbird accounts?");
+                            color: Theme.text;
+                            font-size: Theme.font-lg;
+                            font-weight: 600;
+                        }
+                        Text {
+                            text: @tr("Thundergoose found a Thunderbird profile on this computer. It can take over its mail accounts, saved passwords and sign-ins, and contact names. Nothing is read until you choose to.");
+                            color: Theme.text-muted;
+                            font-size: Theme.font;
+                            wrap: word-wrap;
+                        }
+                        Field {
+                            text <=> App.tb-password;
+                            input-type: password;
+                            placeholder: @tr("Thunderbird primary password (only if you set one)");
+                            clearable: false;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+                            Btn {
+                                text: @tr("Import from Thunderbird");
+                                icon: Icons.refresh;
+                                primary: true;
+                                clicked => { App.reimport(); }
+                            }
+                            Btn {
+                                text: @tr("Set up an account myself");
+                                icon: Icons.user-plus;
+                                clicked => {
+                                    App.add-open = true;
+                                    App.add-step = 0;
+                                }
+                            }
+                        }
+                    }
+                }
                 Text { text: @tr("Accounts"); color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 600; }
                 if App.accounts.length == 0 && !App.add-open: Text {
                     text: @tr("No accounts yet. Add one below, or import them from Thunderbird.");
@@ -1465,12 +1511,12 @@ component SettingsDialog inherits Rectangle {
                 Divider { }
                 Text { text: @tr("Thunderbird"); color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 600; }
                 Text {
-                    text: App.profile-path != "" ? @tr("Accounts, saved passwords, sign-ins and contact names can be taken from {}", App.profile-path) : @tr("No Thunderbird profile found.");
+                    text: App.profile-path != "" ? @tr("Accounts, saved passwords, sign-ins and contact names can be imported from {}. Only when you ask for it.", App.profile-path) : @tr("No Thunderbird profile found.");
                     color: Theme.text-muted;
                     font-size: Theme.font;
                     wrap: word-wrap;
                 }
-                if App.profile-path != "": HorizontalLayout {
+                if App.profile-path != "" && !(App.accounts.length == 0 && !App.add-open): HorizontalLayout {
                     spacing: 8px;
                     Field {
                         text <=> App.tb-password;
@@ -1484,6 +1530,11 @@ component SettingsDialog inherits Rectangle {
                         clicked => { App.reimport(); }
                     }
                 }
+                if App.profile-path != "": SwitchRow {
+                    text: @tr("Stay linked: keep reading contact names and renewed sign-ins from Thunderbird");
+                    checked <=> App.tb-linked;
+                    toggled => { App.tb-link-changed(); }
+                }
                 Divider { }
                 Text { text: @tr("Notifications"); color: Theme.text-muted; font-size: Theme.font-sm; font-weight: 600; }
                 SwitchRow {
@@ -1495,6 +1546,14 @@ component SettingsDialog inherits Rectangle {
                     text: @tr("Play a sound for new mail");
                     checked <=> App.notify-sound;
                     toggled => { App.notify-changed(); }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Btn {
+                        text: @tr("Send a test notification");
+                        icon: Icons.info;
+                        clicked => { App.test-notification(); }
+                    }
                 }
                 Text {
                     text: @tr("Muted and ignored conversations never notify. Muted ones still show unread messages in the Muted tab.");

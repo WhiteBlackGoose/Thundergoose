@@ -40,6 +40,13 @@ fn main() -> Result<(), slint::PlatformError> {
             demo::prepare();
             shots::take(&out)
         }
+        Some("--notify-test") => {
+            let paths = config::Paths::new();
+            notify::show(&paths.data, "Thundergoose", "Notifications work. New mail will show up like this.", None);
+            notify::sound(&paths.data);
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            Ok(())
+        }
         Some("--version") => {
             println!("thundergoose {}", env!("CARGO_PKG_VERSION"));
             Ok(())

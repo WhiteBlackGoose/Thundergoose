@@ -100,5 +100,13 @@ pub fn take(out: &Path) -> Result<(), PlatformError> {
     ui.global::<App>().set_settings_open(true);
     settle();
     save(&window, &out.join("settings-light.png"));
+
+    // First start on a computer with Thunderbird (not used in the README).
+    if std::env::var_os("THUNDERGOOSE_SHOT_WELCOME").is_some() {
+        crate::app::with_core(|c| c.forget_accounts_for_shot());
+        ui.global::<App>().set_profile_path("/home/sam/.thunderbird/x1y2z3.default".into());
+        settle();
+        save(&window, &out.join("welcome.png"));
+    }
     Ok(())
 }

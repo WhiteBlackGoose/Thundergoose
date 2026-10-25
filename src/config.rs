@@ -90,11 +90,21 @@ pub struct Settings {
     pub notify_sound: bool,
     #[serde(default = "yes")]
     pub favicons: bool,
+    /// Keep reading contact names and renewed sign-ins from the Thunderbird profile. Unset
+    /// means: linked if accounts were imported from it.
+    #[serde(default)]
+    pub thunderbird_linked: Option<bool>,
+}
+
+impl Settings {
+    pub fn tb_linked(&self) -> bool {
+        self.thunderbird_linked.unwrap_or(self.thunderbird_profile.is_some())
+    }
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { accent: 0, theme: 0, thunderbird_profile: None, notify_desktop: true, notify_sound: true, favicons: true }
+        Settings { accent: 0, theme: 0, thunderbird_profile: None, notify_desktop: true, notify_sound: true, favicons: true, thunderbird_linked: None }
     }
 }
 

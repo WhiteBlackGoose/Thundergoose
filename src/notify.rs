@@ -2,15 +2,49 @@
 
 use std::path::{Path, PathBuf};
 
-pub fn show(title: &str, body: &str) {
-    let (title, body) = (title.to_string(), body.to_string());
+/// The app icon as a file, for notification servers that want a path.
+fn icon_file(data: &Path) -> Option<PathBuf> {
+    let path = data.join("icon.png");
+    if !path.exists() {
+        std::fs::write(&path, include_bytes!("../packaging/thundergoose-256.png")).ok()?;
+    }
+    Some(path)
+}
+
+/// Shows a notification through the system's notification service (freedesktop on Linux,
+/// Notification Center on macOS, toasts on Windows). `on_click` runs when it is clicked, where
+/// the platform reports that.
+pub fn show(data: &Path, title: &str, body: &str, on_click: Option<Box<dyn FnOnce() + Send>>) {
+    let (title, body, icon) = (title.to_string(), body.to_string(), icon_file(data));
     std::thread::spawn(move || {
         let mut n = notify_rust::Notification::new();
         n.appname("Thundergoose").summary(&title).body(&body);
         #[cfg(all(unix, not(target_os = "macos")))]
-        n.icon("mail-unread").hint(notify_rust::Hint::Category("email.arrived".into()));
-        if let Err(e) = n.show() {
-            eprintln!("notification: {e}");
+        {
+            n.hint(notify_rust::Hint::DesktopEntry("thundergoose".into())).hint(notify_rust::Hint::Category("email.arrived".into()));
+            match &icon {
+                Some(p) => n.icon(&p.to_string_lossy()),
+                None => n.icon("mail-unread"),
+            };
+            if on_click.is_some() {
+                n.action("default", "Open");
+            }
+        }
+        let _ = &icon;
+        match n.show() {
+            #[cfg(all(unix, not(target_os = "macos")))]
+            Ok(handle) => {
+                if let Some(f) = on_click {
+                    handle.wait_for_action(|action| {
+                        if action == "default" {
+                            f();
+                        }
+                    });
+                }
+            }
+            #[cfg(not(all(unix, not(target_os = "macos"))))]
+            Ok(_) => drop(on_click),
+            Err(e) => eprintln!("notification: {e}"),
         }
     });
 }

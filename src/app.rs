@@ -226,6 +226,8 @@ pub struct Core {
     self_to: String,
     /// Showing made-up mail: no servers, nothing is sent.
     demo: bool,
+    /// The Thunderbird profile on this computer, offered for import.
+    tb_found: Option<PathBuf>,
 }
 
 thread_local! {
@@ -906,6 +908,11 @@ impl Core {
 
     // ---------------------------------------------------------- appearance
 
+    pub(crate) fn forget_accounts_for_shot(&mut self) {
+        self.accounts.clear();
+        self.refresh_status();
+    }
+
     pub(crate) fn set_tab(&mut self, tab: i32) {
         self.tab = tab;
         self.refresh_peers();
@@ -940,7 +947,7 @@ impl Core {
             return;
         }
         let flag = |k: &str| self.flags.get(k).copied().unwrap_or_default();
-        let mut items: Vec<(String, String)> = Vec::new();
+        let mut items: Vec<(String, String, String)> = Vec::new();
         for id in fresh {
             let Some((peer, from_addr, from_name, preview, outgoing, seen)) = self.store.mail_brief(id) else { continue };
             if outgoing || seen || self.selected.as_deref() == Some(peer.as_str()) {
@@ -953,20 +960,28 @@ impl Core {
             }
             let who = self.name_of(&from_addr).cloned().filter(|n| !n.is_empty()).unwrap_or(if from_name.is_empty() { from_addr.clone() } else { from_name });
             let title = if peer.contains(',') { format!("{who} in {}", self.peer_title(&peer)) } else { who };
-            items.push((title, preview));
+            items.push((title, preview, peer));
         }
         if items.is_empty() {
             return;
         }
         if self.settings.notify_desktop {
+            let open = |peer: String| -> Option<Box<dyn FnOnce() + Send>> {
+                Some(Box::new(move || {
+                    on_ui(move |c| {
+                        c.open_peer(peer);
+                        let _ = c.ui().show();
+                    })
+                }))
+            };
             if items.len() <= 3 {
-                for (title, body) in &items {
-                    crate::notify::show(title, body);
+                for (title, body, peer) in &items {
+                    crate::notify::show(&self.paths.data, title, body, open(peer.clone()));
                 }
             } else {
-                let mut names: Vec<&str> = items.iter().map(|(t, _)| t.as_str()).collect();
+                let mut names: Vec<&str> = items.iter().map(|(t, _, _)| t.as_str()).collect();
                 names.dedup();
-                crate::notify::show(&format!("{} new messages", items.len()), &names.join(", "));
+                crate::notify::show(&self.paths.data, &format!("{} new messages", items.len()), &names.join(", "), open(items[0].2.clone()));
             }
         }
         if self.settings.notify_sound {
@@ -1189,12 +1204,12 @@ impl Core {
 pub fn check() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let paths = Paths::new();
-    let mut settings: Settings = load_json(&paths.settings()).unwrap_or_default();
-    let (accounts, secrets, profile, warnings) = load_or_import(&paths, &mut settings);
-    for w in warnings {
-        println!("warning: {w}");
+    let settings: Settings = load_json(&paths.settings()).unwrap_or_default();
+    let (accounts, secrets, _, linked) = load_accounts(&paths, &settings);
+    if accounts.is_empty() {
+        println!("No accounts yet. Start Thundergoose to add one or to import them from Thunderbird.");
     }
-    let creds = Creds::new(&paths, secrets, profile);
+    let creds = Creds::new(&paths, secrets, linked);
     for a in &accounts {
         let imap = match crate::imapc::connect(a, &creds) {
             Ok(mut s) => {
@@ -1211,25 +1226,14 @@ pub fn check() {
     }
 }
 
-fn load_or_import(paths: &Paths, settings: &mut Settings) -> (Vec<Account>, Secrets, Option<PathBuf>, Vec<String>) {
-    let profile = settings.thunderbird_profile.clone().filter(|p| p.join("prefs.js").exists()).or_else(crate::tb::find_profile);
-    let accounts: Option<Vec<Account>> = load_json(&paths.accounts());
-    if let Some(accounts) = accounts.filter(|a| !a.is_empty()) {
-        let secrets = load_json(&paths.secrets()).unwrap_or_default();
-        return (accounts, secrets, profile, Vec::new());
-    }
-    let Some(p) = profile.clone() else {
-        return (Vec::new(), Secrets::default(), None, vec!["No Thunderbird profile found".into()]);
-    };
-    match crate::tb::import(&p, "") {
-        Ok(imp) => {
-            let _ = save_json(&paths.accounts(), &imp.accounts, false);
-            let _ = save_json(&paths.secrets(), &imp.secrets, true);
-            settings.thunderbird_profile = Some(p.clone());
-            (imp.accounts, imp.secrets, Some(p), imp.warnings)
-        }
-        Err(e) => (Vec::new(), Secrets::default(), Some(p), vec![e]),
-    }
+/// Accounts and secrets as saved, the Thunderbird profile found on this computer, and that
+/// profile again if the user chose to stay linked to it. Nothing is imported by itself.
+fn load_accounts(paths: &Paths, settings: &Settings) -> (Vec<Account>, Secrets, Option<PathBuf>, Option<PathBuf>) {
+    let found = settings.thunderbird_profile.clone().filter(|p| p.join("prefs.js").exists()).or_else(crate::tb::find_profile);
+    let accounts = load_json(&paths.accounts()).unwrap_or_default();
+    let secrets = load_json(&paths.secrets()).unwrap_or_default();
+    let linked = found.clone().filter(|_| settings.tb_linked());
+    (accounts, secrets, found, linked)
 }
 
 pub fn run(demo: bool) -> Result<(), slint::PlatformError> {
@@ -1244,15 +1248,14 @@ pub fn run(demo: bool) -> Result<(), slint::PlatformError> {
 pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::PlatformError> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let paths = Paths::new();
-    let mut settings: Settings = load_json(&paths.settings()).unwrap_or_default();
-    let (accounts, secrets, profile, warnings) = if demo {
-        (load_json(&paths.accounts()).unwrap_or_default(), Secrets::default(), None, Vec::new())
+    let settings: Settings = load_json(&paths.settings()).unwrap_or_default();
+    let (accounts, secrets, profile, linked) = if demo {
+        (load_json(&paths.accounts()).unwrap_or_default(), Secrets::default(), None, None)
     } else {
-        load_or_import(&paths, &mut settings)
+        load_accounts(&paths, &settings)
     };
-    let _ = save_json(&paths.settings(), &settings, false);
     let store = Store::open(&paths.db()).map_err(|e| slint::PlatformError::Other(format!("cannot open {}: {e}", paths.db().display())))?;
-    if let Some(p) = &profile {
+    if let Some(p) = &linked {
         store.import_names(&crate::tb::address_book(p));
     }
     if store.parse_version() < crate::store::PARSE_VERSION {
@@ -1265,7 +1268,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
     }
     let me: sync::Me = Arc::new(std::sync::RwLock::new(sync::me_addresses(&accounts)));
     let flags = store.flags();
-    let creds = Arc::new(Creds::new(&paths, secrets, profile.clone()));
+    let creds = Arc::new(Creds::new(&paths, secrets, linked.clone()));
     let shared = Arc::new(Shared::new());
     let workers: HashMap<String, Sender<Cmd>> = if demo {
         for a in &accounts {
@@ -1283,6 +1286,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
     app.set_notify_desktop(settings.notify_desktop);
     app.set_notify_sound(settings.notify_sound);
     app.set_profile_path(profile.as_ref().map(|p| p.display().to_string()).unwrap_or_default().into());
+    app.set_tb_linked(linked.is_some());
     let messages = Rc::new(VecModel::<MessageItem>::default());
     app.set_messages(ModelRc::from(messages.clone()));
 
@@ -1324,6 +1328,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         previews_inflight: 0,
         self_to: String::new(),
         demo,
+        tb_found: profile,
     }));
     CORE.with(|c| *c.borrow_mut() = Some(core.clone()));
 
@@ -1334,16 +1339,12 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         c.refresh_status();
         c.refresh_peers();
         if c.accounts.is_empty() {
-            // First start without Thunderbird: go straight to adding an account.
+            // First start: offer the Thunderbird import if there is a profile, else go straight
+            // to adding an account.
             let ui = c.ui();
             let app = ui.global::<App>();
             app.set_settings_open(true);
-            app.set_add_open(true);
-            if !warnings.is_empty() {
-                c.toast(warnings.join(" · "), true);
-            }
-        } else if !warnings.is_empty() {
-            c.toast(warnings.join(" · "), true);
+            app.set_add_open(c.tb_found.is_none());
         }
     }
 
@@ -1580,7 +1581,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
     });
     app.on_reimport(|| {
         with_core(|c| {
-            let Some(p) = c.creds.tb_profile.clone() else { return };
+            let Some(p) = c.tb_found.clone() else { return };
             let password = c.ui().global::<App>().get_tb_password().to_string();
             match crate::tb::import(&p, &password) {
                 Ok(imp) => {
@@ -1596,6 +1597,12 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
                         c.add_account(acct);
                     }
                     c.ui().global::<App>().set_tb_password(SharedString::new());
+                    // Importing links the profile: names and renewed sign-ins keep coming.
+                    c.settings.thunderbird_profile = Some(p.clone());
+                    c.settings.thunderbird_linked = Some(true);
+                    let _ = save_json(&c.paths.settings(), &c.settings, false);
+                    c.creds.set_tb_profile(Some(p.clone()));
+                    c.ui().global::<App>().set_tb_linked(true);
                     let mut msg = format!("Imported {n} accounts from Thunderbird");
                     if !imp.warnings.is_empty() {
                         msg.push_str(&format!(" · {}", imp.warnings.join(" · ")));
@@ -1604,6 +1611,21 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
                 }
                 Err(e) => c.toast(e, true),
             }
+        })
+    });
+    app.on_tb_link_changed(|| {
+        with_core(|c| {
+            let on = c.ui().global::<App>().get_tb_linked();
+            c.settings.thunderbird_linked = Some(on);
+            let _ = save_json(&c.paths.settings(), &c.settings, false);
+            let profile = c.tb_found.clone().filter(|_| on);
+            if let Some(p) = &profile {
+                c.store.import_names(&crate::tb::address_book(p));
+                c.refresh_names();
+                c.refresh_peers();
+            }
+            c.creds.set_tb_profile(profile);
+            c.toast(if on { "Linked to Thunderbird" } else { "Thunderbird is no longer read" }, false);
         })
     });
     app.on_set_tab(|i| with_core(|c| c.set_tab(i)));
@@ -1622,6 +1644,14 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
                 let seen = c.store.mark_peer_seen(&key);
                 c.flag(seen, true);
                 c.refresh_peers();
+            }
+        })
+    });
+    app.on_test_notification(|| {
+        with_core(|c| {
+            crate::notify::show(&c.paths.data, "Thundergoose", "Notifications work. New mail will show up like this.", None);
+            if c.settings.notify_sound {
+                crate::notify::sound(&c.paths.data);
             }
         })
     });

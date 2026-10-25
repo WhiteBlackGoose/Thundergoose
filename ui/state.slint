@@ -158,6 +158,8 @@ export global App {
     in-out property <int> accent;
     in-out property <int> theme-mode;
     in property <string> profile-path;
+    /// Contact names and renewed sign-ins keep coming from Thunderbird.
+    in-out property <bool> tb-linked;
     in property <string> version;
     in-out property <bool> notify-desktop;
     in-out property <bool> notify-sound;
@@ -217,6 +219,8 @@ export global App {
     callback toggle-flag(int, int);
     callback mark-read-at(int);
     callback notify-changed();
+    callback test-notification();
+    callback tb-link-changed();
     callback add-detect();
     callback add-submit();
     callback remove-account(string);

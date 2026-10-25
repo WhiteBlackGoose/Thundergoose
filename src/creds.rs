@@ -32,12 +32,13 @@ pub struct Creds {
     secrets_path: PathBuf,
     secrets: Mutex<Secrets>,
     tokens: Mutex<HashMap<String, (String, Instant)>>,
-    pub tb_profile: Option<PathBuf>,
+    /// The linked Thunderbird profile, if the user chose to stay linked.
+    tb_profile: Mutex<Option<PathBuf>>,
 }
 
 impl Creds {
     pub fn new(paths: &Paths, secrets: Secrets, tb_profile: Option<PathBuf>) -> Self {
-        Creds { secrets_path: paths.secrets(), secrets: Mutex::new(secrets), tokens: Mutex::new(HashMap::new()), tb_profile }
+        Creds { secrets_path: paths.secrets(), secrets: Mutex::new(secrets), tokens: Mutex::new(HashMap::new()), tb_profile: Mutex::new(tb_profile) }
     }
 
     fn save(&self, secrets: &Secrets) {
@@ -59,18 +60,22 @@ impl Creds {
         self.tokens.lock().unwrap().remove(account);
     }
 
+    pub fn set_tb_profile(&self, profile: Option<PathBuf>) {
+        *self.tb_profile.lock().unwrap() = profile;
+    }
+
     pub fn invalidate(&self, acct: &Account) {
         self.tokens.lock().unwrap().remove(&acct.id);
     }
 
     /// Picks up a token Thunderbird may have refreshed since we imported it.
     fn token_from_thunderbird(&self, acct: &Account, issuer: Issuer) -> Option<String> {
-        let profile = self.tb_profile.as_ref()?;
+        let profile = self.tb_profile.lock().unwrap().clone()?;
         let origin = match issuer {
             Issuer::Google => "oauth://accounts.google.com",
             Issuer::Microsoft => "oauth://login.microsoftonline.com",
         };
-        crate::tb::read_logins(profile, "")
+        crate::tb::read_logins(&profile, "")
             .ok()?
             .into_iter()
             .find(|l| l.origin == origin && (l.username.eq_ignore_ascii_case(&acct.imap.username) || l.username.eq_ignore_ascii_case(&acct.email)))
