@@ -51,7 +51,8 @@ from and which one gets it; the bubbles show the way it went.</td>
 
 - **Which address, at a glance.** Every chat carries a colored tag for the address(es) of yours
   that contact writes to ("● work", "● gmail", in the colors of the account chips), and every
-  message says *to* or *from* which of your addresses it went. Name the tags and pick their
+  message says *to* or *from* which of your addresses it went, its bubble tinted and outlined
+  in that account's color. Name the tags and pick their
   colors (16 to choose from) in *Settings → Accounts*.
 - **Unread filter.** The *Unread* chip narrows any tab (Chats, Muted, Ignored, Spam) to
   conversations with unread mail.
@@ -67,7 +68,10 @@ from and which one gets it; the bubbles show the way it went.</td>
 - **HTML mail, rendered in the conversation.** Newsletters, receipts and anything with real
   layout are drawn inside the bubble by [Blitz](https://github.com/DioxusLabs/blitz), a Rust
   HTML/CSS engine: tables, buttons, embedded pictures. Quoted history is cut like in plain text.
-  Links are clickable and show their real address on hover, which helps against phishing.
+  Text can be selected and copied (<kbd>Ctrl</kbd>+<kbd>C</kbd>). The old HTML attributes
+  mail templates rely on (`cellpadding`, `align`, `valign`, `width`, `<font>` …) are translated
+  to CSS the way browsers do. Links are clickable and show their real address on hover, which
+  helps against phishing.
   Remote images (and the tracking pixels among them) stay blocked until you click *Load images*
   or *Always from this sender*. *Show as text* switches any mail to plain text.
 - **Pictures inline.** Image attachments up to 10 MiB show right in the bubble (rotated the way

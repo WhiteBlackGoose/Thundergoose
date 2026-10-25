@@ -71,6 +71,8 @@ export struct MessageItem {
     day: string,
     via: string,
     via-color: color,
+    /// Color of the account the mail went to (transparent with a single address).
+    account-color: color,
     /// Only in a Junk folder.
     junk: bool,
     loading: bool,
@@ -121,6 +123,7 @@ export global App {
     in property <[AccountItem]> accounts;
     in-out property <int> account-filter: -1;
     in property <bool> unread-only;
+    in-out property <length> sidebar-width: 360px;
     in property <int> total-unread;
     in property <bool> syncing;
     in-out property <int> tab;
@@ -210,6 +213,8 @@ export global App {
     callback search-accepted();
     callback filter(int);
     callback set-unread-only(bool);
+    /// The sidebar was dragged to a new width.
+    callback sidebar-resized();
     callback load-earlier();
     callback toggle-message(int);
     callback open-html(int);
@@ -217,6 +222,12 @@ export global App {
     pure callback link-at(int, float, float) -> string;
     pure callback short-url(string) -> string;
     callback open-link(string);
+    /// Selecting text in a rendered mail, at CSS coordinates.
+    callback html-press(int, float, float);
+    callback html-drag(int, float, float);
+    callback html-release(int);
+    /// Copy the selection in a rendered mail, or the whole mail without one.
+    callback html-copy(int);
     /// Load remote images of a mail; `true`: always for its sender.
     callback load-images(int, bool);
     callback toggle-format(int);

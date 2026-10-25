@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use base64::Engine;
-use blitz_dom::{local_name, BaseDocument, DocumentConfig};
+use blitz_dom::{local_name, ns, BaseDocument, DocumentConfig, LocalName, QualName};
 use blitz_html::HtmlDocument;
 use blitz_traits::net::{Bytes, NetHandler, NetProvider, Request};
 use blitz_traits::shell::{ColorScheme, Viewport};
@@ -201,38 +201,224 @@ fn links(doc: &BaseDocument, max_y: f32) -> Vec<Link> {
     out
 }
 
-/// Renders `html` at `scale` (physical pixels per CSS pixel). `full` keeps quoted history and
-/// doesn't cut long mail.
-pub fn render(html: &str, inline: HashMap<String, Vec<u8>>, remote: bool, scale: f32, full: bool) -> Option<Rendered> {
-    let pending = Arc::new(AtomicUsize::new(0));
-    let provider = Arc::new(Provider { inline, remote, blocked: AtomicBool::new(false), pending: pending.clone() });
-    let width = (CSS_WIDTH * scale).round() as u32;
-    let mut doc = HtmlDocument::from_html(
-        html,
-        DocumentConfig { viewport: Some(Viewport::new(width, 800, scale, ColorScheme::Light)), net_provider: Some(provider.clone()), ..Default::default() },
-    );
-    let quoted = if full { false } else { strip_quotes(&mut doc) };
-    doc.resolve(0.0);
-    let start = Instant::now();
-    while pending.load(Ordering::SeqCst) > 0 && start.elapsed() < REMOTE_TIMEOUT + Duration::from_secs(1) {
-        std::thread::sleep(Duration::from_millis(25));
+fn css_length(v: &str) -> Option<String> {
+    let v = v.trim();
+    if v.ends_with('%') && v[..v.len() - 1].trim().parse::<f32>().is_ok() {
+        Some(v.to_string())
+    } else {
+        let n: f32 = v.trim_end_matches("px").trim().parse().ok()?;
+        Some(format!("{n}px"))
+    }
+}
+
+/// The HTML attributes browsers turn into style ("presentational hints"), which mail
+/// templates lean on heavily and Blitz doesn't read: `cellpadding`, `align`, `<font>`, …
+/// They go in front of the inline style, so the mail's own CSS still wins.
+fn presentational_hints(doc: &mut BaseDocument) {
+    let Ok(ids) = doc.query_selector_all("*") else { return };
+    let attr = |doc: &BaseDocument, id, name: &str| doc.get_node(id).and_then(|n| n.attr(LocalName::from(name))).map(str::to_string);
+    let tag_of = |doc: &BaseDocument, id| doc.get_node(id).and_then(|n| n.element_data()).map(|e| e.name.local.to_string()).unwrap_or_default();
+    let ancestor = |doc: &BaseDocument, id, tag: &str| {
+        let mut cur = doc.get_node(id).and_then(|n| n.parent);
+        while let Some(c) = cur {
+            if tag_of(doc, c) == tag {
+                return Some(c);
+            }
+            cur = doc.get_node(c).and_then(|n| n.parent);
+        }
+        None
+    };
+    let mut styles = Vec::new();
+    for id in ids.iter().copied() {
+        let tag = tag_of(doc, id);
+        let a = |name: &str| attr(doc, id, name);
+        let mut css = String::new();
+        let mut add = |k: &str, v: &str| css.push_str(&format!("{k}:{v};"));
+        if matches!(tag.as_str(), "table" | "td" | "th" | "img" | "hr" | "col" | "iframe") {
+            if let Some(w) = a("width").as_deref().and_then(css_length) {
+                add("width", &w);
+            }
+            // Percent heights only stretch things here; browsers mostly ignore them in mail too.
+            if let Some(h) = a("height").as_deref().and_then(css_length).filter(|h| !h.ends_with('%')) {
+                if tag != "hr" {
+                    add("height", &h);
+                }
+            }
+        }
+        match tag.as_str() {
+            "table" => {
+                if let Some(n) = a("border").and_then(|b| b.trim().parse::<u32>().ok()).filter(|n| *n > 0) {
+                    add("border", &format!("{n}px outset #a0a0a0"));
+                }
+                if let Some(n) = a("cellspacing").and_then(|v| v.trim().parse::<u32>().ok()) {
+                    add("border-spacing", &format!("{n}px"));
+                }
+                match a("align").map(|v| v.to_ascii_lowercase()).as_deref() {
+                    Some("center") => {
+                        add("margin-left", "auto");
+                        add("margin-right", "auto");
+                    }
+                    Some(side @ ("left" | "right")) => add("float", side),
+                    _ => {}
+                }
+            }
+            "td" | "th" => {
+                let table = ancestor(doc, id, "table");
+                if let Some(n) = table.and_then(|t| attr(doc, t, "cellpadding")).and_then(|v| v.trim().parse::<u32>().ok()) {
+                    add("padding", &format!("{n}px"));
+                }
+                if table.and_then(|t| attr(doc, t, "border")).and_then(|b| b.trim().parse::<u32>().ok()).is_some_and(|n| n > 0) {
+                    add("border", "1px inset #a0a0a0");
+                }
+                let row = ancestor(doc, id, "tr");
+                if let Some(al) = a("align").or_else(|| row.and_then(|r| attr(doc, r, "align"))) {
+                    add("text-align", &al.to_ascii_lowercase());
+                }
+                if let Some(v) = a("valign").or_else(|| row.and_then(|r| attr(doc, r, "valign"))) {
+                    add("vertical-align", &v.to_ascii_lowercase());
+                }
+                if a("nowrap").is_some() {
+                    add("white-space", "nowrap");
+                }
+            }
+            "img" => {
+                match a("align").map(|v| v.to_ascii_lowercase()).as_deref() {
+                    Some(side @ ("left" | "right")) => add("float", side),
+                    Some(v @ ("top" | "middle" | "bottom")) => add("vertical-align", v),
+                    _ => {}
+                }
+                if let Some(n) = a("border").and_then(|b| b.trim().parse::<u32>().ok()) {
+                    add("border", &format!("{n}px solid"));
+                }
+                if let Some(n) = a("hspace").and_then(|v| v.trim().parse::<u32>().ok()) {
+                    add("margin-left", &format!("{n}px"));
+                    add("margin-right", &format!("{n}px"));
+                }
+                if let Some(n) = a("vspace").and_then(|v| v.trim().parse::<u32>().ok()) {
+                    add("margin-top", &format!("{n}px"));
+                    add("margin-bottom", &format!("{n}px"));
+                }
+            }
+            "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "tr" | "tbody" | "thead" | "tfoot" => {
+                if let Some(al) = a("align") {
+                    add("text-align", &al.to_ascii_lowercase());
+                }
+            }
+            "font" => {
+                if let Some(c) = a("color") {
+                    add("color", &c);
+                }
+                if let Some(f) = a("face") {
+                    add("font-family", &f);
+                }
+                if let Some(size) = a("size") {
+                    let size = size.trim();
+                    let n: i32 = match size.strip_prefix('+') {
+                        Some(rel) => 3 + rel.parse::<i32>().unwrap_or(0),
+                        None => match size.strip_prefix('-') {
+                            Some(rel) => 3 - rel.parse::<i32>().unwrap_or(0),
+                            None => size.parse().unwrap_or(3),
+                        },
+                    };
+                    let px = [10, 13, 16, 18, 24, 32, 48][(n.clamp(1, 7) - 1) as usize];
+                    add("font-size", &format!("{px}px"));
+                }
+            }
+            "body" => {
+                if let Some(c) = a("text") {
+                    add("color", &c);
+                }
+            }
+            "hr" => {
+                if let Some(n) = a("size").and_then(|v| v.trim().parse::<u32>().ok()) {
+                    add("height", &format!("{n}px"));
+                }
+                if let Some(c) = a("color") {
+                    add("background-color", &c);
+                    add("border-color", &c);
+                }
+            }
+            _ => {}
+        }
+        if !css.is_empty() {
+            styles.push((id, css));
+        }
+    }
+    let existing: Vec<Option<String>> = styles.iter().map(|(id, _)| attr(doc, *id, "style")).collect();
+    let mut m = doc.mutate();
+    for ((id, css), old) in styles.into_iter().zip(existing) {
+        m.set_attribute(id, QualName::new(None, ns!(), local_name!("style")), &format!("{css}{}", old.unwrap_or_default()));
+    }
+}
+
+/// A laid-out HTML mail, kept alive so text in it can be selected.
+pub struct Page {
+    doc: HtmlDocument,
+    scale: f32,
+    css_height: f32,
+}
+
+impl Page {
+    /// Lays out `html` at `scale` (physical pixels per CSS pixel). `full` keeps quoted history
+    /// and doesn't cut long mail.
+    pub fn load(html: &str, inline: HashMap<String, Vec<u8>>, remote: bool, scale: f32, full: bool) -> (Page, Rendered) {
+        let pending = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(Provider { inline, remote, blocked: AtomicBool::new(false), pending: pending.clone() });
+        let width = (CSS_WIDTH * scale).round() as u32;
+        let mut doc = HtmlDocument::from_html(
+            html,
+            DocumentConfig { viewport: Some(Viewport::new(width, 800, scale, ColorScheme::Light)), net_provider: Some(provider.clone()), ..Default::default() },
+        );
+        presentational_hints(&mut doc);
+        let quoted = if full { false } else { strip_quotes(&mut doc) };
         doc.resolve(0.0);
+        let start = Instant::now();
+        while pending.load(Ordering::SeqCst) > 0 && start.elapsed() < REMOTE_TIMEOUT + Duration::from_secs(1) {
+            std::thread::sleep(Duration::from_millis(25));
+            doc.resolve(0.0);
+        }
+        doc.resolve(0.0);
+        let natural = doc.root_element().final_layout().size.height.max(1.0);
+        let limit = if full { MAX_HEIGHT } else { CUT_HEIGHT };
+        let css_height = natural.min(limit);
+        let links = links(&doc, css_height);
+        let mut page = Page { doc, scale, css_height };
+        let pixels = page.paint();
+        let rendered = Rendered { pixels, links, css_height, blocked: provider.blocked.load(Ordering::Relaxed), quoted, cut: natural > limit };
+        (page, rendered)
     }
-    doc.resolve(0.0);
-    let natural = doc.root_element().final_layout().size.height.max(1.0);
-    let limit = if full { MAX_HEIGHT } else { CUT_HEIGHT };
-    let css_height = natural.min(limit);
-    let height = (css_height * scale).ceil() as u32;
-    let links = links(&doc, css_height);
-    let rgba = anyrender::render_to_buffer::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(|scene| blitz_paint::paint_scene(scene, &mut doc, scale as f64, width, height, 0, 0), width, height);
-    // Mail without a background of its own is meant to be on white.
-    let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(width, height);
-    for (dst, src) in pixels.make_mut_slice().iter_mut().zip(rgba.chunks_exact(4)) {
-        let a = src[3] as u16;
-        let over = |c: u8| (c as u16 + (255 - a)).min(255) as u8;
-        *dst = Rgba8Pixel { r: over(src[0]), g: over(src[1]), b: over(src[2]), a: 255 };
+
+    pub fn paint(&mut self) -> SharedPixelBuffer<Rgba8Pixel> {
+        let width = (CSS_WIDTH * self.scale).round() as u32;
+        let height = (self.css_height * self.scale).ceil() as u32;
+        let doc = &mut self.doc;
+        let rgba = anyrender::render_to_buffer::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(|scene| blitz_paint::paint_scene(scene, doc, self.scale as f64, width, height, 0, 0), width, height);
+        // Mail without a background of its own is meant to be on white.
+        let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(width, height);
+        for (dst, src) in pixels.make_mut_slice().iter_mut().zip(rgba.chunks_exact(4)) {
+            let a = src[3] as u16;
+            let over = |c: u8| (c as u16 + (255 - a)).min(255) as u8;
+            *dst = Rgba8Pixel { r: over(src[0]), g: over(src[1]), b: over(src[2]), a: 255 };
+        }
+        pixels
     }
-    Some(Rendered { pixels, links, css_height, blocked: provider.blocked.load(Ordering::Relaxed), quoted, cut: natural > limit })
+
+    /// Starts a selection at CSS coordinates (or clears it, off text).
+    pub fn press(&mut self, x: f32, y: f32) {
+        match self.doc.find_text_position(x, y) {
+            Some((node, offset)) => self.doc.set_text_selection(node, offset, node, offset),
+            None => self.doc.clear_text_selection(),
+        }
+    }
+
+    /// Extends the selection; whether anything changed.
+    pub fn drag(&mut self, x: f32, y: f32) -> bool {
+        self.doc.extend_text_selection_to_point(x, y)
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        self.doc.get_selected_text().filter(|t| !t.trim().is_empty())
+    }
 }
 
 #[cfg(test)]

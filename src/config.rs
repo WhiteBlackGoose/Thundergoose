@@ -110,6 +110,13 @@ pub struct Settings {
     /// Interface size on top of the system's scaling (1.0 = as the system says).
     #[serde(default = "one")]
     pub ui_scale: f32,
+    /// Width of the conversation list, in logical pixels.
+    #[serde(default = "sidebar_width")]
+    pub sidebar_width: f32,
+}
+
+fn sidebar_width() -> f32 {
+    360.0
 }
 
 fn one() -> f32 {
@@ -124,7 +131,7 @@ impl Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { accent: 0, theme: 0, thunderbird_profile: None, notify_desktop: true, notify_sound: true, favicons: true, thunderbird_linked: None, ui_scale: 1.0 }
+        Settings { accent: 0, theme: 0, thunderbird_profile: None, notify_desktop: true, notify_sound: true, favicons: true, thunderbird_linked: None, ui_scale: 1.0, sidebar_width: 360.0 }
     }
 }
 

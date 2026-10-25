@@ -520,10 +520,43 @@ component HtmlCard inherits Rectangle {
         height: parent.height;
         image-fit: fill;
     }
+    property <length> press-x;
+    property <length> press-y;
+    property <bool> dragged;
+    function css(v: length) -> float { return v / root.width * 620; }
+    fs := FocusScope {
+        key-pressed(e) => {
+            if (e.modifiers.control || e.modifiers.meta) && e.text == "c" {
+                App.html-copy(root.m.id);
+                return accept;
+            }
+            reject
+        }
+    }
     ta := TouchArea {
-        mouse-cursor: root.url != "" ? pointer : default;
+        mouse-cursor: root.url != "" ? pointer : text;
+        pointer-event(e) => {
+            if e.button == PointerEventButton.left && e.kind == PointerEventKind.down {
+                root.press-x = self.mouse-x;
+                root.press-y = self.mouse-y;
+                root.dragged = false;
+                fs.focus();
+                App.html-press(root.m.id, root.css(self.mouse-x), root.css(self.mouse-y));
+            }
+            if e.button == PointerEventButton.left && e.kind == PointerEventKind.up {
+                App.html-release(root.m.id);
+            }
+        }
+        moved => {
+            if abs(self.mouse-x - root.press-x) + abs(self.mouse-y - root.press-y) > 4px {
+                root.dragged = true;
+            }
+            if root.dragged {
+                App.html-drag(root.m.id, root.css(self.mouse-x), root.css(self.mouse-y));
+            }
+        }
         clicked => {
-            if root.url != "" {
+            if root.url != "" && !root.dragged {
                 Tip.hide();
                 App.open-link(root.url);
             }
@@ -565,10 +598,13 @@ component MessageRow inherits VerticalLayout {
         Rectangle {
             max-width: root.avail * 0.76;
             min-width: 120px;
-            background: root.m.outgoing ? Theme.bubble-out : Theme.bubble-in;
+            property <color> base: root.m.outgoing ? Theme.bubble-out : Theme.bubble-in;
+            background: self.colored ? self.base.mix(root.m.account-color, 0.9) : self.base;
             border-radius: 14px;
-            border-color: root.m.group-label != "" ? Theme.accent.with-alpha(0.45) : root.m.outgoing ? Theme.bubble-out-border : Theme.border;
-            border-width: root.m.group-label != "" ? 1.5px : 1px;
+            // Which of your accounts it went to: its tag color, as a stripe and in the border.
+            property <bool> colored: root.m.account-color.alpha > 0;
+            border-color: self.colored ? root.m.account-color.with-alpha(0.8) : root.m.group-label != "" ? Theme.accent.with-alpha(0.45) : root.m.outgoing ? Theme.bubble-out-border : Theme.border;
+            border-width: root.m.group-label != "" || self.colored ? 1.5px : 1px;
             drop-shadow-blur: 3px;
             drop-shadow-offset-y: 1px;
             drop-shadow-color: Theme.shadow.with-alpha(0.08);
@@ -687,7 +723,13 @@ component MessageRow inherits VerticalLayout {
                     LinkText {
                         text: @tr("Copy");
                         subtle: true;
-                        clicked => { App.copy(root.m.text); }
+                        clicked => {
+                            if root.m.html-on {
+                                App.html-copy(root.m.id);
+                            } else {
+                                App.copy(root.m.text);
+                            }
+                        }
                     }
                     if root.m.junk: Text {
                         text: @tr("in Junk");
@@ -1068,7 +1110,14 @@ component PeoplePopup inherits Card {
                 height: 44px;
                 border-radius: 8px;
                 background: pta.has-hover ? Theme.hover : transparent;
-                pta := TouchArea { }
+                // Click a person: their own conversation (it also shows the group mail you share).
+                pta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        App.people-open = false;
+                        App.write-to(p.addr);
+                    }
+                }
                 HorizontalLayout {
                     padding-left: 6px;
                     padding-right: 4px;
@@ -1859,12 +1908,33 @@ export component AppWindow inherits Window {
         }
         HorizontalLayout {
             sidebar := Sidebar {
-                min-width: 300px;
-                preferred-width: 360px;
-                max-width: 420px;
+                width: max(260px, min(App.sidebar-width, 600px));
                 horizontal-stretch: 0;
             }
-            VDivider { }
+            // Drag to resize the sidebar.
+            Rectangle {
+                width: 5px;
+                background: handle.has-hover || handle.pressed ? Theme.accent.with-alpha(0.35) : transparent;
+                animate background { duration: 120ms; }
+                Rectangle {
+                    x: 2px;
+                    width: 1px;
+                    background: Theme.border;
+                }
+                handle := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => {
+                        if self.pressed {
+                            App.sidebar-width = max(260px, min(App.sidebar-width + self.mouse-x - self.pressed-x, 600px, root.width - 420px));
+                        }
+                    }
+                    pointer-event(e) => {
+                        if e.kind == PointerEventKind.up {
+                            App.sidebar-resized();
+                        }
+                    }
+                }
+            }
             Rectangle {
                 horizontal-stretch: 1;
                 EmptyState {

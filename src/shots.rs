@@ -106,6 +106,27 @@ pub fn take(out: &Path) -> Result<(), PlatformError> {
     settle();
     save(&window, &out.join("settings-light.png"));
 
+    // Selecting text in a rendered HTML mail (not used in the README).
+    if std::env::var_os("THUNDERGOOSE_SHOT_SELECT").is_some() {
+        use slint::platform::PointerEventButton;
+        ui.global::<App>().set_settings_open(false);
+        look(2, 0);
+        open("orders@trailhead-outfitters.example");
+        settle();
+        let (a, b) = (LogicalPosition::new(470.0, 207.0), LogicalPosition::new(760.0, 232.0));
+        window.dispatch_event(WindowEvent::PointerMoved { position: a });
+        window.dispatch_event(WindowEvent::PointerPressed { position: a, button: PointerEventButton::Left });
+        for i in 1..=10 {
+            let t = i as f32 / 10.0;
+            window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t) });
+            slint::platform::update_timers_and_animations();
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        window.dispatch_event(WindowEvent::PointerReleased { position: b, button: PointerEventButton::Left });
+        settle();
+        save(&window, &out.join("select.png"));
+    }
+
     // The tag color picker stays open while sync status keeps updating (not used in the README).
     if std::env::var_os("THUNDERGOOSE_SHOT_PICKER").is_some() {
         let click = |x: f32, y: f32| {

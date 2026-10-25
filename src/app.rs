@@ -36,7 +36,6 @@ const PREVIEW_PX: u32 = 1200;
 type PreviewKey = (i64, usize);
 /// A rendering of an HTML mail: mail id, full (with quotes, uncut), remote images loaded.
 type HtmlKey = (i64, bool, bool);
-type HtmlJobs = Arc<Mutex<Vec<(HtmlKey, Option<crate::html::Rendered>)>>>;
 /// Renderings kept in memory.
 const HTML_CACHE: usize = 40;
 
@@ -49,23 +48,88 @@ struct HtmlView {
     cut: bool,
 }
 
-/// One thread renders HTML mail, newest requests first, so fonts load once.
-fn spawn_html_renderer(db: PathBuf, jobs: HtmlJobs) -> Sender<(HtmlKey, f32)> {
-    let (tx, rx) = std::sync::mpsc::channel::<(HtmlKey, f32)>();
+/// What the HTML thread hands back.
+enum HtmlDone {
+    Rendered(HtmlKey, Option<crate::html::Rendered>),
+    /// The selection changed: a new picture of the same page.
+    Repainted(HtmlKey, SharedPixelBuffer<Rgba8Pixel>),
+    /// Text selected after a drag (None: nothing selected).
+    Selected(i64, Option<String>),
+}
+type HtmlJobs = Arc<Mutex<Vec<HtmlDone>>>;
+
+enum HtmlCmd {
+    Render(HtmlKey, f32),
+    Press(HtmlKey, f32, f32),
+    Drag(HtmlKey, f32, f32),
+    Release(HtmlKey),
+}
+
+/// Pages kept laid out for selecting text.
+const LIVE_PAGES: usize = 12;
+
+/// One thread lays out and paints HTML mail, newest requests first, so fonts load once. It keeps
+/// the recent pages alive, so text can be selected in them.
+fn spawn_html_renderer(db: PathBuf, jobs: HtmlJobs) -> Sender<HtmlCmd> {
+    let (tx, rx) = std::sync::mpsc::channel::<HtmlCmd>();
     std::thread::Builder::new()
         .name("html".into())
         .spawn(move || {
             let Ok(store) = Store::open(&db) else { return };
-            while let Ok((key, scale)) = rx.recv() {
-                let (id, full, remote) = key;
-                let raw = store.raw(id);
-                // Blitz is young; a mail that trips it shows as text instead of taking the app down.
-                let rendered = raw.and_then(|raw| {
-                    let html = crate::parse::html(&raw)?;
-                    let inline = crate::parse::inline_parts(&raw);
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::html::render(&html, inline, remote, scale, full))).ok().flatten()
-                });
-                jobs.lock().unwrap().push((key, rendered));
+            let mut pages: Vec<(HtmlKey, crate::html::Page)> = Vec::new();
+            let done = |d: HtmlDone| {
+                jobs.lock().unwrap().push(d);
+                // Selection feedback shouldn't wait for the next tick.
+                let _ = slint::invoke_from_event_loop(|| with_core(|c| c.html_finished()));
+            };
+            while let Ok(first) = rx.recv() {
+                // Of a burst of drags only the last matters.
+                let mut cmds = vec![first];
+                cmds.extend(rx.try_iter());
+                let last_drag = cmds.iter().rposition(|c| matches!(c, HtmlCmd::Drag(..)));
+                for (i, cmd) in cmds.into_iter().enumerate() {
+                    match cmd {
+                        HtmlCmd::Render(key, scale) => {
+                            let (id, full, remote) = key;
+                            // Blitz is young; a mail that trips it shows as text instead of taking the app down.
+                            let loaded = store.raw(id).and_then(|raw| {
+                                let html = crate::parse::html(&raw)?;
+                                let inline = crate::parse::inline_parts(&raw);
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::html::Page::load(&html, inline, remote, scale, full))).ok()
+                            });
+                            match loaded {
+                                Some((page, rendered)) => {
+                                    pages.retain(|(k, _)| *k != key);
+                                    pages.push((key, page));
+                                    if pages.len() > LIVE_PAGES {
+                                        pages.remove(0);
+                                    }
+                                    done(HtmlDone::Rendered(key, Some(rendered)));
+                                }
+                                None => done(HtmlDone::Rendered(key, None)),
+                            }
+                        }
+                        HtmlCmd::Press(key, x, y) => {
+                            if let Some((_, page)) = pages.iter_mut().find(|(k, _)| *k == key) {
+                                page.press(x, y);
+                                done(HtmlDone::Repainted(key, page.paint()));
+                            }
+                        }
+                        HtmlCmd::Drag(key, x, y) if Some(i) == last_drag => {
+                            if let Some((_, page)) = pages.iter_mut().find(|(k, _)| *k == key) {
+                                if page.drag(x, y) {
+                                    done(HtmlDone::Repainted(key, page.paint()));
+                                }
+                            }
+                        }
+                        HtmlCmd::Drag(..) => {}
+                        HtmlCmd::Release(key) => {
+                            if let Some((_, page)) = pages.iter().find(|(k, _)| *k == key) {
+                                done(HtmlDone::Selected(key.0, page.selected_text()));
+                            }
+                        }
+                    }
+                }
             }
         })
         .expect("spawn html thread");
@@ -297,7 +361,9 @@ pub struct Core {
     /// HTML renderings; `None` while rendering or when it failed.
     html_cache: HashMap<HtmlKey, Option<HtmlView>>,
     html_jobs: HtmlJobs,
-    html_tx: Sender<(HtmlKey, f32)>,
+    html_tx: Sender<HtmlCmd>,
+    /// Text selected in a rendered mail, by mail id.
+    html_selection: Option<(i64, String)>,
     html_inflight: usize,
     /// Which rendering each visible mail shows, for link lookups.
     html_shown: HashMap<i64, HtmlKey>,
@@ -832,6 +898,15 @@ impl Core {
                 day: if new_day { day } else { String::new() }.into(),
                 via: via.into(),
                 via_color: self.addr_color(&m.me_addr),
+                account_color: if !self.tags_shown() {
+                    slint::Color::from_argb_u8(0, 0, 0, 0)
+                } else if key.is_empty() {
+                    // Between your own addresses: the one it went to.
+                    let to = m.recipients.iter().map(|p| p.addr.to_lowercase()).find(|a| me.contains(a)).unwrap_or_else(|| m.me_addr.clone());
+                    self.addr_color(&to)
+                } else {
+                    self.addr_color(&m.me_addr)
+                },
                 junk: m.junk,
                 loading: !m.has_body,
                 has_html: m.has_html,
@@ -876,7 +951,43 @@ impl Core {
         for k in keys {
             self.html_cache.insert(k, None);
             self.html_inflight += 1;
-            let _ = self.html_tx.send((k, scale));
+            let _ = self.html_tx.send(HtmlCmd::Render(k, scale));
+        }
+    }
+
+    /// Takes in what the HTML thread finished.
+    fn html_finished(&mut self) {
+        let finished: Vec<HtmlDone> = std::mem::take(&mut *self.html_jobs.lock().unwrap());
+        if finished.is_empty() {
+            return;
+        }
+        for d in finished {
+            match d {
+                HtmlDone::Rendered(k, Some(r)) => {
+                    self.html_inflight = self.html_inflight.saturating_sub(1);
+                    let view = HtmlView { image: slint::Image::from_rgba8(r.pixels), links: r.links, css_height: r.css_height, blocked: r.blocked, quoted: r.quoted, cut: r.cut };
+                    self.html_cache.insert(k, Some(view));
+                }
+                HtmlDone::Rendered(k, None) => {
+                    self.html_inflight = self.html_inflight.saturating_sub(1);
+                    // Couldn't render: show this mail as text.
+                    self.html_cache.remove(&k);
+                    self.format_override.insert(k.0, false);
+                }
+                HtmlDone::Repainted(k, pixels) => {
+                    if let Some(Some(v)) = self.html_cache.get_mut(&k) {
+                        v.image = slint::Image::from_rgba8(pixels);
+                    }
+                }
+                HtmlDone::Selected(id, text) => self.html_selection = text.map(|t| (id, t)),
+            }
+        }
+        self.load_conversation(false);
+    }
+
+    fn html_pointer(&mut self, id: i64, cmd: impl FnOnce(HtmlKey) -> HtmlCmd) {
+        if let Some(k) = self.html_shown.get(&id).copied() {
+            let _ = self.html_tx.send(cmd(k));
         }
     }
 
@@ -1102,6 +1213,7 @@ impl Core {
         app.set_theme_mode(self.settings.theme);
         app.set_show_favicons(self.settings.favicons);
         app.set_ui_scale(scale_index(self.settings.ui_scale) as i32);
+        app.set_sidebar_width(self.settings.sidebar_width);
     }
 
     // ------------------------------------------------------ notifications
@@ -1370,24 +1482,7 @@ impl Core {
                 self.load_conversation(false);
             }
         }
-        let rendered: Vec<_> = std::mem::take(&mut *self.html_jobs.lock().unwrap());
-        if !rendered.is_empty() {
-            self.html_inflight = self.html_inflight.saturating_sub(rendered.len());
-            for (k, r) in rendered {
-                match r {
-                    Some(r) => {
-                        let view = HtmlView { image: slint::Image::from_rgba8(r.pixels), links: r.links, css_height: r.css_height, blocked: r.blocked, quoted: r.quoted, cut: r.cut };
-                        self.html_cache.insert(k, Some(view));
-                    }
-                    None => {
-                        // Couldn't render: show this mail as text.
-                        self.html_cache.remove(&k);
-                        self.format_override.insert(k.0, false);
-                    }
-                }
-            }
-            self.load_conversation(false);
-        }
+        self.html_finished();
         let done: Vec<_> = std::mem::take(&mut *self.preview_jobs.lock().unwrap());
         if !done.is_empty() {
             self.previews_inflight = self.previews_inflight.saturating_sub(done.len());
@@ -1563,6 +1658,7 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         html_cache: HashMap::new(),
         html_jobs,
         html_tx,
+        html_selection: None,
         html_inflight: 0,
         html_shown: HashMap::new(),
         format_override: HashMap::new(),
@@ -1625,6 +1721,12 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
             }
         })
     });
+    app.on_sidebar_resized(|| {
+        with_core(|c| {
+            c.settings.sidebar_width = c.ui().global::<App>().get_sidebar_width();
+            let _ = save_json(&c.paths.settings(), &c.settings, false);
+        })
+    });
     app.on_set_unread_only(|on| {
         with_core(|c| {
             c.unread_only = on;
@@ -1658,6 +1760,21 @@ pub fn start(demo: bool) -> Result<(AppWindow, Vec<slint::Timer>), slint::Platfo
         let mut url = String::new();
         with_core(|c| url = c.link_at(id as i64, x, y));
         url.into()
+    });
+    app.on_html_press(|id, x, y| with_core(|c| c.html_pointer(id as i64, |k| HtmlCmd::Press(k, x, y))));
+    app.on_html_drag(|id, x, y| with_core(|c| c.html_pointer(id as i64, |k| HtmlCmd::Drag(k, x, y))));
+    app.on_html_release(|id| with_core(|c| c.html_pointer(id as i64, HtmlCmd::Release)));
+    app.on_html_copy(|id| {
+        with_core(|c| {
+            let text = match &c.html_selection {
+                Some((sel, t)) if *sel == id as i64 => t.clone(),
+                _ => c.find_mail(id).map(|m| m.text.clone()).unwrap_or_default(),
+            };
+            match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text)) {
+                Ok(()) => c.toast("Copied", false),
+                Err(e) => c.toast(format!("Clipboard unavailable: {e}"), true),
+            }
+        })
     });
     app.on_short_url(|url| {
         let s = url.as_str();

@@ -48,6 +48,17 @@ fn main() -> Result<(), slint::PlatformError> {
             std::thread::sleep(std::time::Duration::from_secs(2));
             Ok(())
         }
+        Some("--render-html") => {
+            // Developer aid: how an HTML file comes out in a conversation.
+            let (input, output) = (std::env::args().nth(2).unwrap_or_default(), std::env::args().nth(3).unwrap_or_else(|| "mail.png".into()));
+            let html = std::fs::read_to_string(&input).map_err(|e| slint::PlatformError::Other(format!("{input}: {e}")))?;
+            let (_, r) = html::Page::load(&html, Default::default(), false, 2.0, true);
+            let (w, h) = (r.pixels.width(), r.pixels.height());
+            let bytes: Vec<u8> = r.pixels.as_slice().iter().flat_map(|p| [p.r, p.g, p.b]).collect();
+            image::RgbImage::from_raw(w, h, bytes).map(|i| i.save(&output));
+            println!("{output}: {w}x{h}, {} links, remote content {}", r.links.len(), if r.blocked { "blocked" } else { "none" });
+            Ok(())
+        }
         Some("--version") => {
             println!("thundergoose {}", env!("CARGO_PKG_VERSION"));
             Ok(())
