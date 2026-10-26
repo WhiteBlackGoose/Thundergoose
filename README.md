@@ -254,3 +254,7 @@ directory.
 | `ui/*.slint` | The interface (theme shared with [Neobrush](https://github.com/WhiteBlackGoose/Neobrush)) |
 
 Fonts: Inter (OFL). Icons: Lucide (ISC).
+
+## License
+
+MIT, see [LICENSE](LICENSE).
