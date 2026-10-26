@@ -35,7 +35,7 @@
 
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "thundergoose";
-          version = "1.1.0";
+          version = "1.1.1";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
           nativeBuildInputs = with pkgs; [ pkg-config makeWrapper python3 ];

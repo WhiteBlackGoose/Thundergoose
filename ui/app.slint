@@ -260,11 +260,6 @@ component Sidebar inherits Rectangle {
             padding-left: 14px;
             padding-right: 10px;
             spacing: 2px;
-            if App.narrow: IconButton {
-                icon: Icons.menu;
-                tip: @tr("Views and accounts");
-                clicked => { App.drawer-open = true; }
-            }
             Brand { }
             Rectangle { horizontal-stretch: 1; }
             if App.syncing: VerticalLayout {
@@ -272,12 +267,12 @@ component Sidebar inherits Rectangle {
                 padding-right: 6px;
                 Spinner { running: true; }
             }
-            IconButton {
+            if !App.narrow: IconButton {
                 icon: Icons.new-chat;
                 tip: @tr("New conversation") + "  Ctrl+N";
                 clicked => { App.start-new-chat(); }
             }
-            IconButton {
+            if !App.narrow: IconButton {
                 icon: Icons.refresh;
                 tip: @tr("Check for new mail") + "  F5";
                 clicked => { App.sync-now(); }
@@ -325,19 +320,6 @@ component Sidebar inherits Rectangle {
                         clicked => { App.filter(i); }
                     }
                 }
-            }
-        }
-        // In the narrow layout the views live in the drawer; say which one is showing.
-        if App.narrow && (App.tab != 0 || App.account-filter >= 0 || App.unread-only): HorizontalLayout {
-            padding-left: 16px;
-            padding-right: 16px;
-            Text {
-                text: [@tr("Chats"), @tr("Muted"), @tr("Ignored"), @tr("Spam")][App.tab]
-                    + (App.account-filter >= 0 ? " · " + App.accounts[App.account-filter].label : "")
-                    + (App.unread-only ? " · " + @tr("unread only") : "");
-                color: Theme.accent;
-                font-size: Theme.font-sm;
-                font-weight: 600;
             }
         }
         if !App.narrow: HorizontalLayout {
@@ -406,6 +388,69 @@ component Sidebar inherits Rectangle {
                     clicked => { App.select-peer(i); }
                     flag(which) => { App.toggle-flag(i, which); }
                     mark-read => { App.mark-read-at(i); }
+                }
+            }
+        }
+        // Phones: what the thumb needs, at the bottom.
+        if App.narrow: Rectangle {
+            height: 60px;
+            background: Theme.surface;
+            Rectangle { height: 1px; y: 0; background: Theme.border; }
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 12px;
+                spacing: 6px;
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        size: 44px;
+                        icon-size: 22px;
+                        icon: Icons.menu;
+                        clicked => { App.drawer-open = true; }
+                    }
+                }
+                Text {
+                    text: [@tr("Chats"), @tr("Muted"), @tr("Ignored"), @tr("Spam")][App.tab]
+                        + (App.account-filter >= 0 ? " · " + App.accounts[App.account-filter].label : "")
+                        + (App.unread-only ? " · " + @tr("unread") : "");
+                    color: Theme.text-muted;
+                    font-size: Theme.font-md;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    TouchArea {
+                        clicked => { App.drawer-open = true; }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        size: 44px;
+                        icon-size: 20px;
+                        icon: Icons.refresh;
+                        clicked => { App.sync-now(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 48px;
+                        height: 48px;
+                        border-radius: 24px;
+                        background: nta.pressed ? Theme.accent.darker(0.15) : Theme.accent;
+                        drop-shadow-blur: 6px;
+                        drop-shadow-color: Theme.shadow.with-alpha(0.3);
+                        Image {
+                            source: Icons.new-chat;
+                            width: 22px;
+                            height: 22px;
+                            colorize: Theme.accent-text;
+                        }
+                        nta := TouchArea {
+                            clicked => { App.start-new-chat(); }
+                        }
+                    }
                 }
             }
         }
@@ -1727,7 +1772,7 @@ component AccountRow inherits Rectangle {
                 y: (parent.height - self.height) / 2;
             }
             Field {
-                width: 220px;
+                max-width: 220px;
                 height: 32px;
                 text: root.acct.tag == root.acct.default-tag ? "" : root.acct.tag;
                 placeholder: @tr("Tag name (default: {})", root.acct.default-tag);
@@ -1761,36 +1806,60 @@ component AccountRow inherits Rectangle {
     }
 }
 
-component FormRow inherits HorizontalLayout {
+/// A labelled form line; on phones the label goes above.
+component FormRow inherits VerticalLayout {
     in property <string> label;
-    spacing: 10px;
-    FieldLabel { text: root.label; width: 86px; }
-    @children
+    spacing: 4px;
+    if App.narrow: FieldLabel { text: root.label; }
+    HorizontalLayout {
+        spacing: 10px;
+        if !App.narrow: FieldLabel { text: root.label; width: 86px; }
+        @children
+    }
 }
 
-component ServerRow inherits HorizontalLayout {
+/// Server, port and encryption; on phones in two lines under the label.
+component ServerRow inherits VerticalLayout {
     in property <string> label;
     in-out property <string> host;
     in-out property <string> port;
     in-out property <int> security;
-    spacing: 8px;
-    FieldLabel { text: root.label; width: 86px; }
-    Field {
-        text <=> root.host;
-        placeholder: @tr("Server");
-        clearable: false;
+    spacing: 6px;
+    if App.narrow: FieldLabel { text: root.label; }
+    HorizontalLayout {
+        spacing: 8px;
+        if !App.narrow: FieldLabel { text: root.label; width: 86px; }
+        Field {
+            text <=> root.host;
+            placeholder: @tr("Server");
+            clearable: false;
+        }
+        if !App.narrow: Field {
+            width: 70px;
+            text <=> root.port;
+            placeholder: @tr("Port");
+            clearable: false;
+        }
+        if !App.narrow: Segmented {
+            width: 190px;
+            y: (parent.height - self.height) / 2;
+            items: ["SSL/TLS", "STARTTLS", @tr("None")];
+            selected <=> root.security;
+        }
     }
-    Field {
-        width: 70px;
-        text <=> root.port;
-        placeholder: @tr("Port");
-        clearable: false;
-    }
-    Segmented {
-        width: 190px;
-        y: (parent.height - self.height) / 2;
-        items: ["SSL/TLS", "STARTTLS", @tr("None")];
-        selected <=> root.security;
+    if App.narrow: HorizontalLayout {
+        spacing: 8px;
+        Field {
+            width: 80px;
+            text <=> root.port;
+            placeholder: @tr("Port");
+            clearable: false;
+        }
+        Segmented {
+            y: (parent.height - self.height) / 2;
+            items: ["SSL/TLS", "STARTTLS", @tr("None")];
+            selected <=> root.security;
+        }
     }
 }
 
@@ -1834,7 +1903,7 @@ component AddAccountForm inherits Rectangle {
         if App.add-step == 1: FormRow {
             label: @tr("Sign-in");
             Segmented {
-                width: 300px;
+                max-width: 300px;
                 items: [@tr("Password"), "Google", "Microsoft"];
                 selected <=> App.add-oauth;
             }
@@ -2096,7 +2165,7 @@ component SettingsDialog inherits Rectangle {
                     spacing: 12px;
                     FieldLabel { text: @tr("Theme"); width: 70px; }
                     Segmented {
-                        width: 260px;
+                        max-width: 260px;
                         items: [@tr("System"), @tr("Light"), @tr("Dark")];
                         selected <=> App.theme-mode;
                         changed => { App.appearance-changed(); }
@@ -2106,7 +2175,7 @@ component SettingsDialog inherits Rectangle {
                     spacing: 12px;
                     FieldLabel { text: @tr("Size"); width: 70px; }
                     Segmented {
-                        width: 400px;
+                        max-width: 400px;
                         items: ["80%", "90%", "100%", "110%", "125%", "150%"];
                         selected <=> App.ui-scale;
                         changed => { App.appearance-changed(); }
@@ -2213,6 +2282,16 @@ component DrawerRow inherits Rectangle {
 /// The views and accounts, sliding in from the left in the narrow layout (like K-9 Mail).
 component Drawer inherits Rectangle {
     property <length> panel-width: min(320px, root.width * 0.85);
+    // Swipe it back to the left to close.
+    SwipeGestureHandler {
+        enabled: App.drawer-open;
+        handle-swipe-left: true;
+        swiped => {
+            if self.pressed-position.x - self.current-position.x > 50px {
+                App.drawer-open = false;
+            }
+        }
+    }
     // The backdrop fades in, the panel slides.
     Rectangle {
         background: Theme.backdrop;
@@ -2349,7 +2428,12 @@ export component AppWindow inherits Window {
     public function focus-composer() { chat.focus-composer(); }
     public function focus-to() { chat.focus-to(); }
 
+    // Phones: keep clear of the status and navigation bars, and of the on-screen keyboard.
+    property <length> top-inset: self.safe-area-insets.top;
+    property <length> bottom-inset: max(self.safe-area-insets.bottom, self.virtual-keyboard-size.height > 0 ? root.height - self.virtual-keyboard-position.y : 0px);
     keys := FocusScope {
+        y: root.top-inset;
+        height: root.height - root.top-inset - root.bottom-inset;
         key-pressed(e) => {
             if e.modifiers.control && (e.text == "k" || e.text == "f") {
                 sidebar.focus-search-field();
@@ -2444,8 +2528,31 @@ export component AppWindow inherits Window {
         }
     }
 
-    if App.narrow: Drawer { }
-    if App.settings-open: SettingsDialog { }
+    // Swipe in from the left edge: the drawer from the list, back from a conversation.
+    if App.narrow && !App.drawer-open && !App.settings-open: SwipeGestureHandler {
+        x: 0;
+        y: root.top-inset;
+        width: 18px;
+        height: root.height - root.top-inset - root.bottom-inset;
+        handle-swipe-right: true;
+        swiped => {
+            if self.current-position.x - self.pressed-position.x > 50px {
+                if App.has-chat || App.new-chat {
+                    App.go-back();
+                } else {
+                    App.drawer-open = true;
+                }
+            }
+        }
+    }
+    if App.narrow: Drawer {
+        y: root.top-inset;
+        height: root.height - root.top-inset - root.bottom-inset;
+    }
+    if App.settings-open: SettingsDialog {
+        y: root.top-inset;
+        height: root.height - root.top-inset - root.bottom-inset;
+    }
 
     if App.toast != "": Rectangle {
         x: (root.width - self.width) / 2;

@@ -36,9 +36,38 @@ impl From<CredError> for ConnError {
     }
 }
 
+/// TLS for IMAP: Mozilla's root certificates, plus the system's (corporate and self-made
+/// authorities). The bundled list matters on Android, whose certificates live where the usual
+/// lookup doesn't search, which left the store empty ("UnknownIssuer").
 pub fn tls() -> &'static RustlsConnector {
     static C: OnceLock<RustlsConnector> = OnceLock::new();
-    C.get_or_init(|| RustlsConnector::new_with_native_certs().unwrap_or_else(|_| RustlsConnector::new_with_webpki_roots_certs()))
+    C.get_or_init(|| {
+        let mut config = rustls_connector::RustlsConnectorConfig::new_with_webpki_roots_certs();
+        config.add_parsable_certificates(system_certificates());
+        config.connector_with_no_client_auth()
+    })
+}
+
+#[cfg(not(target_os = "android"))]
+fn system_certificates() -> Vec<rustls::pki_types::CertificateDer<'static>> {
+    rustls_native_certs::load_native_certs().unwrap_or_default()
+}
+
+/// Android's own authorities and those the user added, one PEM file each.
+#[cfg(target_os = "android")]
+fn system_certificates() -> Vec<rustls::pki_types::CertificateDer<'static>> {
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::CertificateDer;
+    let mut certs = Vec::new();
+    for dir in ["/system/etc/security/cacerts", "/apex/com.android.conscrypt/cacerts", "/data/misc/user/0/cacerts-added"] {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        for e in entries.flatten() {
+            if let Ok(iter) = CertificateDer::pem_file_iter(e.path()) {
+                certs.extend(iter.flatten());
+            }
+        }
+    }
+    certs
 }
 
 fn tcp(host: &str, port: u16) -> Result<TcpStream, ConnError> {

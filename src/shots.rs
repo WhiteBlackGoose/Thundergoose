@@ -206,6 +206,20 @@ pub fn take(out: &Path) -> Result<(), PlatformError> {
         open("orders@trailhead-outfitters.example");
         settle();
         save(&window, &out.join("phone-html.png"));
+        // Settings with the account form at its server step (checks that nothing overflows).
+        let app = ui.global::<App>();
+        app.set_settings_open(true);
+        app.set_add_open(true);
+        app.set_add_step(1);
+        app.set_add_email("sam@rivera.example".into());
+        app.set_add_imap_host("imap.rivera.example".into());
+        app.set_add_imap_port("993".into());
+        app.set_add_smtp_host("smtp.rivera.example".into());
+        app.set_add_smtp_port("465".into());
+        settle();
+        save(&window, &out.join("phone-settings.png"));
+        app.set_add_open(false);
+        app.set_settings_open(false);
     }
 
     // First start on a computer with Thunderbird (not used in the README).

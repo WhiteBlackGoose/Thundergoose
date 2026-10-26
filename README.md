@@ -136,9 +136,10 @@ you mark as spam. They never notify.</td>
 </table>
 
 On a phone (or any window narrower than 700 px) Thundergoose shows one thing at a time, like
-Telegram: the list of people, or the conversation with one of them, with a back button. The
-views (Chats, Muted, Ignored, Spam, Unread only), your accounts and Settings slide in from the
-left, like in K-9 Mail. HTML mail is laid out at the phone's width, or zoomed out when it has a
+Telegram: the list of people, or the conversation with one of them, with a back button (or
+swipe in from the left edge). The views (Chats, Muted, Ignored, Spam, Unread only), your
+accounts and Settings slide in from the left, like in K-9 Mail; the menu and a new-conversation
+button sit at the bottom, within reach of your thumb. HTML mail is laid out at the phone's width, or zoomed out when it has a
 fixed width.
 
 <p align="center"><img src="docs/settings-light.png" alt="Settings: accounts, notifications, appearance" width="70%"></p>

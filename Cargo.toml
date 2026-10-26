@@ -1,6 +1,6 @@
 [package]
 name = "thundergoose"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 description = "An email client that treats mail as conversations with people"
 license = "MIT"
@@ -54,6 +54,7 @@ open = "5"
 notify-rust = "4"
 arboard = { version = "3", features = ["wayland-data-control"] }
 directories = "6"
+rustls-native-certs = "0.7"
 
 # Android: Slint's activity backend; the rest goes through the Java framework.
 [target.'cfg(target_os = "android")'.dependencies]
